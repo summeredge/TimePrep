@@ -134,6 +134,7 @@
     <h2 data-page-node-id="gie1KZic1ZZ2eC5EJSbk4H">4. 执行</h2>
     <div class="row" data-page-node-id="U2wXjgIuR20YaOmTTj9ucP">
       <button class="primary" id="runBtn" onclick="run()" data-page-node-id="ESfcOikRvGjshphwmsSMwY">开始处理</button>
+      <button id="reconnectBtn" onclick="reconnect()" hidden>重新检测服务</button>
       <span id="status" data-page-node-id="jYOCAanpSWFGDD5Ko3w5vP">请选择输入文件</span>
     </div>
     <div class="row" data-page-node-id="FRU8rDJDYTRUwSc9T75BSm"><label data-page-node-id="gRCwr7xduGbPmwFE8n6pPb">输出文件</label><span id="outputPath" data-page-node-id="QOV1IPWj8pPQjWPQCZTsVC">-</span></div>
@@ -176,43 +177,90 @@ function status(text, isError) {
   $('status').className = isError ? 'err' : '';
 }
 
+function requireApi() {
+  if (apiReady) return true;
+  status(versionMismatch ? '服务版本不一致，已阻止该操作，请点击"重新检测服务"。' : '服务未就绪，请稍候或点击"重新检测服务"。', true);
+  return false;
+}
+
+
+/* ---------- 服务状态管理 ---------- */
+function applyMethods(meta) {
+  METHODS = meta.methods;
+  const select = $('ruleSelect');
+  select.textContent = '';
+  meta.presetRules.forEach((rule) => {
+    const opt = document.createElement('option');
+    opt.value = rule;
+    opt.textContent = rule === '' ? '不重采样' : rule;
+    select.appendChild(opt);
+  });
+}
+
+function markServiceReady(message) {
+  apiReady = true;
+  versionMismatch = false;
+  document.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  $('reconnectBtn').hidden = true;
+  if (message) status(message);
+}
+
 function showVersionMismatch() {
   versionMismatch = true;
   apiReady = false;
-  document.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-  status('TimePrep 前后端版本不一致，请重新启动 TimePrep 服务。', true);
+  $('reconnectBtn').hidden = false;
+  status('TimePrep 前后端版本不一致，请点击“重新检测服务”或重启 TimePrep 服务。', true);
 }
 
-function requireApi() {
-  if (apiReady) return true;
-  if (!versionMismatch) status('服务初始化中，请稍候', true);
-  return false;
+function showServiceError(message) {
+  apiReady = false;
+  versionMismatch = false;
+  $('reconnectBtn').hidden = false;
+  status('无法连接服务: ' + message, true);
+}
+
+async function fetchService() {
+  const [health, meta] = await Promise.all([api('/api/health'), api('/api/methods')]);
+  if (health.apiVersion !== EXPECTED_API_VERSION || meta.apiVersion !== EXPECTED_API_VERSION) {
+    const error = new Error('版本不一致');
+    error.code = 'VERSION_MISMATCH';
+    throw error;
+  }
+  return meta;
+}
+
+async function connectService() {
+  try {
+    applyMethods(await fetchService());
+    markServiceReady('服务已连接');
+    return true;
+  } catch (err) {
+    if (err.code === 'VERSION_MISMATCH' || err.status === 404) {
+      showVersionMismatch();
+    } else {
+      showServiceError(err.message);
+    }
+    return false;
+  }
+}
+
+async function reconnect() {
+  const btn = $('reconnectBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  status('正在重新检测服务...');
+  try {
+    await connectService();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ---------- 初始化 ---------- */
 (async function init() {
-  try {
-    const meta = await api('/api/methods');
-    if (meta.apiVersion !== EXPECTED_API_VERSION) {
-      showVersionMismatch();
-      return;
-    }
-    METHODS = meta.methods;
-    const select = $('ruleSelect');
-    meta.presetRules.forEach((rule) => {
-      const opt = document.createElement('option');
-      opt.value = rule;
-      opt.textContent = rule === '' ? '不重采样' : rule;
-      select.appendChild(opt);
-    });
-    apiReady = true;
-  } catch (err) {
-    if (err.status === 404) {
-      showVersionMismatch();
-    } else {
-      status('无法连接服务: ' + err.message, true);
-    }
-  }
+  document.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  $('reconnectBtn').hidden = true;
+  connectService();
 })();
 
 /* ---------- 预览 ---------- */

@@ -1,6 +1,8 @@
 import http.client
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -128,13 +130,95 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(body, "startup page")
 
-    def test_frontend_checks_api_version_and_blocks_actions_on_mismatch(self):
+    def test_html_response_has_no_store_cache_control(self):
+        connection = http.client.HTTPConnection(*self.address, timeout=5)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Cache-Control"), "no-store")
+
+    def test_frontend_has_no_global_permanent_button_disable(self):
         page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
+        script = page[page.index("<script>") : page.index("</script>")]
 
         self.assertIn("const EXPECTED_API_VERSION = 2;", page)
-        self.assertIn("meta.apiVersion !== EXPECTED_API_VERSION", page)
-        self.assertIn("TimePrep 前后端版本不一致，请重新启动 TimePrep 服务。", page)
+        self.assertIn("function applyMethods(meta)", script)
+        self.assertIn("async function fetchService", script)
+        self.assertIn("async function connectService", script)
+        self.assertIn("async function reconnect", script)
+        self.assertIn("apiReady = true;", script)
+        self.assertIn("versionMismatch = false;", script)
+        self.assertIn("TimePrep 前后端版本不一致", page)
+        self.assertIn("重新检测服务", page)
         self.assertGreaterEqual(page.count("if (!requireApi()) return;"), 4)
+        self.assertNotIn("document.querySelectorAll('button').forEach((button) => { button.disabled = true; })", script)
+
+    def test_frontend_smoke_scenarios_via_node(self):
+        """在 Node 中执行真实页面前端脚本，模拟 healthy / mismatch / 恢复 / 网络错误 场景。"""
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            self.skipTest("Node.js 不可用，无法运行前端冒烟测试")
+        project_root = Path(web_server.WEB_DIR).parent
+        harness = Path(__file__).resolve().parent / "frontend_smoke.js"
+        page = project_root / "web" / "index.html"
+        for scenario, checks in {
+            "healthy": [
+                ("initial", True),
+                ("state.apiReady", True),
+                ("state.versionMismatch", False),
+                ("runDisabled", False),
+                ("reconnectHidden", True),
+            ],
+            "mismatch": [
+                ("state.apiReady", False),
+                ("state.versionMismatch", True),
+                ("reconnectVisible", True),
+                ("runDisabled", False),
+            ],
+            "error": [
+                ("state.apiReady", False),
+                ("state.versionMismatch", False),
+                ("reconnectVisible", True),
+                ("runDisabled", False),
+            ],
+            "healthy_recovery": [
+                ("initial", True),
+                ("initialState.apiReady", True),
+                ("initialState.versionMismatch", False),
+                ("afterMismatch.apiReady", False),
+                ("afterMismatch.versionMismatch", True),
+                ("reconnectVisibleAfterMismatch", True),
+                ("afterRecover.apiReady", True),
+                ("afterRecover.versionMismatch", False),
+                ("runDisabled", False),
+                ("reconnectHidden", True),
+            ],
+            "never_disable": [
+                ("runDisabled", False),
+                ("hasDisableAll", False),
+            ],
+        }.items():
+            completed = subprocess.run(
+                [node, str(harness), str(page), scenario],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=60,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertNotIn("error", result, result.get("error"))
+            for key, expected in checks:
+                actual = result
+                for part in key.split("."):
+                    actual = actual[part]
+                self.assertEqual(
+                    actual, expected, f"{scenario}: {key} 期望 {expected}，实际 {actual}"
+                )
 
     def test_default_port_tries_next_port_when_occupied_by_unknown_service(self):
         replacement = object()
