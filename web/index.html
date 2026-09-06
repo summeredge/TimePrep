@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-page-node-id="ony6kieGuOmL52SJjnSKww">
-<head data-page-node-id="D84VIqeyEjVuRBz2V9xgci">
-<meta charset="utf-8" data-page-node-id="OoccerEkGeKVgnDlrYKUYM">
-<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="8UbL4jtaIXVwOI7am9EOus">
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>工业时序数据预处理工具 MVP</title>
 <style>
   :root {
@@ -13,6 +13,8 @@
     --muted: #6b7280;
     --accent: #0a5f9c;
     --accent-soft: #e8f2fb;
+    --raw: #0a5f9c;
+    --filtered: #d97706;
   }
   * { box-sizing: border-box; }
   body {
@@ -22,19 +24,25 @@
   header { background: var(--accent); color: #fff; padding: 14px 24px; }
   header h1 { margin: 0; font-size: 17px; font-weight: 600; }
   header p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
-  main { max-width: 1100px; margin: 20px auto; padding: 0 16px 40px; }
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 16px 18px; margin-bottom: 16px;
+  .workspace {
+    display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr);
+    gap: 16px; align-items: start;
+    max-width: 1600px; margin: 20px auto; padding: 0 16px 40px;
   }
-  .card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .left, .trend {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .left { padding: 16px 18px; }
+  .left > section { margin-bottom: 18px; }
+  .left > section:last-child { margin-bottom: 0; }
+  .left h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
   .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   .row label { width: 82px; color: var(--muted); flex: none; }
   input[type=text], select {
     border: 1px solid var(--border); border-radius: 5px; padding: 6px 9px;
     font: inherit; background: #fff; color: var(--text);
   }
-  input.path { flex: 1; min-width: 260px; font-family: Consolas, monospace; font-size: 13px; }
+  input.path { flex: 1; min-width: 180px; font-family: Consolas, monospace; font-size: 13px; }
   button {
     border: 1px solid var(--border); background: #fff; color: var(--text);
     border-radius: 5px; padding: 6px 13px; font: inherit; cursor: pointer;
@@ -44,7 +52,7 @@
   button.primary:hover { opacity: .9; color: #fff; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 20px; }
   .grid div span { color: var(--muted); display: inline-block; min-width: 68px; }
   .varlist {
     margin-top: 10px; max-height: 74px; overflow: auto; padding: 8px 10px;
@@ -55,7 +63,7 @@
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
   th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; }
   td.name { font-family: Consolas, monospace; }
-  .tablewrap { max-height: 380px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .tablewrap { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
   #status { margin-left: 10px; color: var(--muted); }
   #outputPath { color: var(--accent); font-family: Consolas, monospace; word-break: break-all; }
@@ -65,6 +73,23 @@
     font: 12px/1.7 Consolas, monospace; white-space: pre-wrap; color: #333;
   }
   .err { color: #b3261e; }
+  .trend { padding: 16px 18px; min-width: 0; }
+  .trend h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .trendbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .trendbar label { color: var(--muted); }
+  .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  #trendPlaceholder {
+    height: 420px; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); border: 1px dashed var(--border); border-radius: 6px;
+  }
+  #trendChartWrap { position: relative; display: none; height: 420px; }
+  #trendCanvas { display: block; width: 100%; height: 420px; }
+  #trendTooltip {
+    position: absolute; z-index: 5; display: none; pointer-events: none;
+    background: rgba(31, 35, 40, .92); color: #fff; border-radius: 4px;
+    padding: 5px 8px; font: 11px/1.5 Consolas, monospace; white-space: pre;
+  }
   #dropOverlay {
     position: fixed; inset: 0; z-index: 20; display: none;
     align-items: center; justify-content: center; pointer-events: none;
@@ -72,80 +97,105 @@
     color: var(--accent); font-size: 18px; font-weight: 600;
   }
   #dropOverlay.on { display: flex; }
-
+  .small { display: none; font-size: 12px; color: var(--muted); }
+  @media (max-width: 900px) {
+    .workspace { grid-template-columns: 1fr; }
+    .small { display: block; }
+  }
 </style>
 </head>
-<body data-page-node-id="E7NksKgHewYfOKgvxWsIAZ">
-<header data-page-node-id="mZ3Kc4mTsxlt1jx3VjGETJ">
-  <h1 data-page-node-id="RuJ1AiDorcNQ4XKrWZG7H6">工业时序数据预处理工具 MVP</h1>
-  <p data-page-node-id="KyDGNxd2bcCzK0GLHc6zN1">读取 CSV / Excel / TXT &rarr; 时间排序 &rarr; 重采样 &rarr; 按变量滤波 &rarr; 输出 CSV</p>
+<body>
+<header>
+  <h1>工业时序数据预处理工具 MVP</h1>
+  <p>读取 CSV / Excel / TXT &rarr; 时间排序 &rarr; 重采样 &rarr; 按变量滤波 &rarr; 趋势确认 &rarr; 导出 CSV</p>
 </header>
 
-<main data-page-node-id="QAS6DEmHbeSUf4wIJmH1Mc">
-  <section class="card" data-page-node-id="TFaWeq1EJs2vFQq5372GF6">
-    <h2 data-page-node-id="8Uzy4BzKbAmciLzVn2tjhw">1. 文件</h2>
-    <div class="row" data-page-node-id="7QS4mJRRJeww8U9VRagvoa">
-      <label data-page-node-id="Y2JkI4SR6yPngaabCdjH9s">输入文件</label>
-      <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件" data-page-node-id="fV7Q3reYkeHO05ftcPWkdQ">
-      <button onclick="pickNative('file')" data-page-node-id="ri8PZdBjkyXlMZ5QSnHtt5">浏览...</button>
-    </div>
-    <div class="row" data-page-node-id="idwr6EAC56XWWKZocmnZVq">
-      <label data-page-node-id="iKjQlKYHFY07gBrQIZhKP9">输出目录</label>
-      <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录" data-page-node-id="Xog4uS6zswopGhS6HZORiS">
-      <button onclick="pickNative('dir')" data-page-node-id="XBFyZ1W5eqkBQJ8lsdR6Do">浏览...</button>
-      <button onclick="loadPreview()" data-page-node-id="VbpTnqtVZCmXv0xW6Y98Ba">载入预览</button>
-    </div>
-    <p class="hint" data-page-node-id="hXBCSNcegRwl1voxZbEE0a">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b data-page-node-id="pkTk18eVIpfiAZtVy5Nawt">直接拖放到本页任意位置</b>（会复制一份到项目 uploads 目录，原文件不动）。</p>
-  </section>
+<main class="workspace">
+  <div class="left">
+    <section>
+      <h2>1. 文件</h2>
+      <div class="row">
+        <label>输入文件</label>
+        <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件">
+        <button onclick="pickNative('file')">浏览...</button>
+      </div>
+      <p class="hint">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b>直接拖放到本页任意位置</b>（会复制一份到项目 uploads 目录，原文件不动）。手动输入路径后按 Enter 读取文件信息。</p>
+    </section>
 
-  <section class="card" id="previewCard" hidden data-page-node-id="Q1wf3DuCAYnLmjAbIpspsq">
-    <h2 data-page-node-id="wS92lfwnYi3TQYGQlqZQVB">2. 数据预览</h2>
-    <div class="grid" data-page-node-id="Y7Xng7cyYkRWHhNNRL2nQi">
-      <div data-page-node-id="dyBeIhXZknhr03IO867KXQ"><span data-page-node-id="2Gf3WQYRRXcUeW4SOBRpLD">文件名</span><b id="pFile" data-page-node-id="YeCBW4i53qFCAJxh6Qg1Mv">-</b></div>
-      <div data-page-node-id="atO4HVHalhhbBiYVkNVxdc"><span data-page-node-id="JlDuQYvhIRCBFOHrr9f19C">数据行数</span><b id="pRows" data-page-node-id="PfBo83CtNQ61FK6qG7KgUh">-</b></div>
-      <div data-page-node-id="nVt548eRcGYNkfJQZUMRNQ"><span data-page-node-id="sFko4mCQzDWKxdOs8bH1y0">时间列</span><b id="pTimeCol" data-page-node-id="PBUDQus0dImNm2G9rQDVeP">-</b></div>
-      <div data-page-node-id="4PmB2LUElbCYgonZBTBsAg"><span data-page-node-id="Q94z80FfYpVF6YMSJQ9eie">时间范围</span><b id="pRange" data-page-node-id="qUBKvxM7KWXL0u2aTqY0Zh">-</b></div>
-    </div>
-    <div class="varlist" id="pVars" data-page-node-id="VBi3TItGjIeLsiv0VLBBtX"></div>
-    <div class="row" style="margin-top:12px" data-page-node-id="EfkCC788nY8tcgg2cZ2gfr">
-      <label data-page-node-id="OmOG9ZkkeOGThL9FKU3bPf">重采样</label>
-      <select id="ruleSelect" data-page-node-id="wVyyJ9X4e4By43pswXIWPm"></select>
-      <input type="text" id="ruleCustom" style="width:110px" placeholder="自定义周期" data-page-node-id="zoyIBdVc4DyVjb8eDn2Mdr">
-      <span class="hint" style="margin:0" data-page-node-id="lqWuZbdLxdMDHOr3MMhwkz">留空 = 不重采样；自定义示例 30s / 15min / 1H</span>
-    </div>
-  </section>
+    <section id="previewCard" hidden>
+      <h2>2. 数据信息</h2>
+      <div class="grid">
+        <div><span>文件名</span><b id="pFile">-</b></div>
+        <div><span>数据行数</span><b id="pRows">-</b></div>
+        <div><span>时间列</span><b id="pTimeCol">-</b></div>
+        <div><span>时间范围</span><b id="pRange">-</b></div>
+      </div>
+      <div class="varlist" id="pVars"></div>
+    </section>
 
-  <section class="card" id="configCard" hidden data-page-node-id="IwQwpXA9urI1BsVN6f7PjY">
-    <h2 data-page-node-id="1yVeLOK5EhT0gQTgjPqkd2">3. 变量处理配置</h2>
-    <div class="row" data-page-node-id="9ZcsHPou1aTWg3POMJy6V2">
-      <button onclick="selectAll(true)" data-page-node-id="eJMEAKVGGztU41Ky0E8cgZ">全选</button>
-      <button onclick="selectAll(false)" data-page-node-id="7zFlAE7MZEJqQnI0vn7XBS">全不选</button>
-      <span class="hint" style="margin:0" data-page-node-id="hieWoPWL9LBhzu2BPMFFDq">勾选的变量才会滤波；未勾选变量原样输出</span>
-    </div>
-    <div class="tablewrap" data-page-node-id="U2ZLJGZhzwGlA1HHINDgz0">
-      <table data-page-node-id="cCVMvXLzcpUHOHrgMcg6DU">
-        <thead data-page-node-id="RfVFPCxxvt4hGOpGaR33jN"><tr data-page-node-id="XEvo2J0Et4BX8UtQRwykUA"><th style="width:52px" data-page-node-id="ipzp04U7f96362TDvIVkGq">处理</th><th data-page-node-id="7VMnDN7j6KyV44FZMXp92B">变量</th><th style="width:200px" data-page-node-id="pSXxZu5EifQYpy8s1S78Io">滤波方式</th><th style="width:260px" data-page-node-id="9dVvqMRQ2epb3K0rfvgQ2G">参数</th></tr></thead>
-        <tbody id="varBody" data-page-node-id="EyGsm4xqzHMltDXKHmASFi"></tbody>
-      </table>
-    </div>
-  </section>
+    <section id="configCard" hidden>
+      <h2>3. 重采样与变量滤波</h2>
+      <div class="row">
+        <label>重采样</label>
+        <select id="ruleSelect"></select>
+        <input type="text" id="ruleCustom" style="width:110px" placeholder="自定义周期">
+        <span class="hint" style="margin:0">留空 = 不重采样；自定义示例 30s / 15min / 1H</span>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button onclick="selectAll(true)">全选</button>
+        <button onclick="selectAll(false)">全不选</button>
+        <span class="hint" style="margin:0">勾选的变量才会滤波；未勾选变量原样输出</span>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th style="width:52px">处理</th><th>变量</th><th style="width:200px">滤波方式</th><th style="width:260px">参数</th></tr></thead>
+          <tbody id="varBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-  <section class="card" data-page-node-id="RqmoQ9RHVyzVTkrww4QWYG">
-    <h2 data-page-node-id="gie1KZic1ZZ2eC5EJSbk4H">4. 执行</h2>
-    <div class="row" data-page-node-id="U2wXjgIuR20YaOmTTj9ucP">
-      <button class="primary" id="runBtn" onclick="run()" data-page-node-id="ESfcOikRvGjshphwmsSMwY">开始处理</button>
-      <button id="reconnectBtn" onclick="reconnect()" hidden>重新检测服务</button>
-      <span id="status" data-page-node-id="jYOCAanpSWFGDD5Ko3w5vP">请选择输入文件</span>
+    <section>
+      <h2>4. 处理</h2>
+      <div class="row">
+        <button class="primary" id="runBtn" onclick="run()">开始处理</button>
+        <button id="reconnectBtn" onclick="reconnect()" hidden>重新检测服务</button>
+        <span id="status">请选择输入文件</span>
+      </div>
+      <div class="row"><label>输出文件</label><span id="outputPath">尚未导出</span></div>
+      <div id="log"></div>
+    </section>
+
+    <section>
+      <h2>5. 导出</h2>
+      <div class="row">
+        <label>输出目录</label>
+        <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录">
+        <button onclick="pickNative('dir')">浏览...</button>
+        <button id="exportBtn" onclick="exportResult()">导出</button>
+      </div>
+      <p class="small">小屏幕下趋势区域显示在本区域下方。</p>
+    </section>
+  </div>
+
+  <section class="trend">
+    <h2>趋势对比</h2>
+    <div class="trendbar">
+      <label>变量</label>
+      <select id="trendVar" disabled><option value="">请先处理数据</option></select>
+      <div class="legend">
+        <span><i style="background:var(--raw)"></i>原始趋势</span>
+        <span><i style="background:var(--filtered)"></i>滤波后趋势</span>
+      </div>
     </div>
-    <div class="row" data-page-node-id="FRU8rDJDYTRUwSc9T75BSm"><label data-page-node-id="gRCwr7xduGbPmwFE8n6pPb">输出文件</label><span id="outputPath" data-page-node-id="QOV1IPWj8pPQjWPQCZTsVC">-</span></div>
-    <div class="tablewrap" id="resultWrap" hidden style="max-height:260px" data-page-node-id="xPFGWjx1FbvlxhSM7mBfSu">
-      <table data-page-node-id="pIzfX0Jrk2cnX4RHcpYdsS"><thead id="resultHead" data-page-node-id="eF16vtTZnyoiWcHOelkGFq"></thead><tbody id="resultBody" data-page-node-id="i2mz2enY6r52a8UpDpGhtE"></tbody></table>
+    <div id="trendPlaceholder">完成滤波处理后可在此比较趋势</div>
+    <div id="trendChartWrap">
+      <canvas id="trendCanvas"></canvas>
+      <div id="trendTooltip"></div>
     </div>
-    <div id="log" data-page-node-id="sy7Hnfyrak6lwvWA9cVU4f"></div>
   </section>
 </main>
 
-<div id="dropOverlay" data-page-node-id="pQCcZEvJwqMnBNIy8m5DD3">松开鼠标，载入数据文件</div>
+<div id="dropOverlay">松开鼠标，载入数据文件</div>
 
 <script>
 const EXPECTED_API_VERSION = 2;
@@ -154,6 +204,10 @@ let COLUMNS = [];
 let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params }
 let apiReady = false;
 let versionMismatch = false;
+let RESULT = null;
+let PROCESSED = [];
+let TREND = null;
+let TREND_POINTS = [];
 const $ = (id) => document.getElementById(id);
 
 async function api(url, options) {
@@ -182,7 +236,6 @@ function requireApi() {
   status(versionMismatch ? '服务版本不一致，已阻止该操作，请点击"重新检测服务"。' : '服务未就绪，请稍候或点击"重新检测服务"。', true);
   return false;
 }
-
 
 /* ---------- 服务状态管理 ---------- */
 function applyMethods(meta) {
@@ -260,12 +313,34 @@ async function reconnect() {
 (async function init() {
   document.querySelectorAll('button').forEach((button) => { button.disabled = false; });
   $('reconnectBtn').hidden = true;
+  if ($('inputPath')) $('inputPath').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); loadPreview(); }
+  });
+  bindTrendEvents();
   connectService();
 })();
 
-/* ---------- 预览 ---------- */
+/* ---------- 处理结果失效管理 ---------- */
+function resetResult() {
+  RESULT = null;
+  PROCESSED = [];
+  TREND = null;
+  TREND_POINTS = [];
+  $('outputPath').textContent = '尚未导出';
+  $('trendVar').textContent = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = '请先处理数据';
+  $('trendVar').appendChild(opt);
+  $('trendVar').disabled = true;
+  $('trendPlaceholder').hidden = false;
+  $('trendChartWrap').hidden = true;
+}
+
+/* ---------- 文件信息 ---------- */
 async function loadPreview() {
   if (!requireApi()) return;
+  resetResult();
   const path = $('inputPath').value.trim();
   if (!path) { status('请先选择输入文件', true); return; }
   status('读取中...');
@@ -275,7 +350,7 @@ async function loadPreview() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     });
-    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[\/\\][^\/\\]+$/, '');
     COLUMNS = data.columns;
     $('pFile').textContent = data.file;
     $('pRows').textContent = data.rows + ' 行';
@@ -359,9 +434,8 @@ function updateSelection() {
 async function run() {
   if (!requireApi()) return;
   const inputPath = $('inputPath').value.trim();
-  const outputDir = $('outputDir').value.trim();
   if (!inputPath) { status('请先选择输入文件', true); return; }
-  if (!outputDir) { status('请先选择输出目录', true); return; }
+  resetResult();
 
   const rule = $('ruleSelect').value === '' ? $('ruleCustom').value.trim() : $('ruleSelect').value;
   const variables = {};
@@ -379,13 +453,16 @@ async function run() {
     const data = await api('/api/process', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputPath, outputDir, rule, variables }),
+      body: JSON.stringify({ inputPath, rule, variables }),
     });
-    $('outputPath').textContent = data.outputPath;
-    status(`完成：${data.rowsIn} → ${data.rowsOut} 行，滤波变量 ${data.processed.length} 个`);
+    RESULT = data;
+    PROCESSED = data.processed || [];
+    $('outputPath').textContent = '尚未导出';
     data.messages.forEach((m) => log('  - ' + m));
-    log('输出：' + data.outputPath);
-    renderResult(data);
+    showTrendOptions(PROCESSED);
+    const first = PROCESSED[0];
+    if (first) await loadTrend(first);
+    status(`处理完成：${data.rowsIn} → ${data.rowsOut} 行，滤波变量 ${PROCESSED.length} 个，等待确认并导出`);
   } catch (err) {
     status('处理失败: ' + err.message, true);
     log('[错误] ' + err.message);
@@ -394,28 +471,160 @@ async function run() {
   }
 }
 
-function renderResult(data) {
-  const head = $('resultHead');
-  const body = $('resultBody');
-  head.textContent = '';
-  body.textContent = '';
-  const tr = document.createElement('tr');
-  data.previewColumns.forEach((name) => {
-    const th = document.createElement('th');
-    th.textContent = name;
-    tr.appendChild(th);
+function showTrendOptions(names) {
+  const select = $('trendVar');
+  select.textContent = '';
+  if (!names.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '无可用变量';
+    select.appendChild(opt);
+    select.disabled = true;
+    showTrendEmpty();
+    return;
+  }
+  names.forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
   });
-  head.appendChild(tr);
-  data.previewRows.forEach((row) => {
-    const tr = document.createElement('tr');
-    row.forEach((value) => {
-      const td = document.createElement('td');
-      td.textContent = value === null ? '' : (typeof value === 'number' ? value.toFixed(4) : value);
-      tr.appendChild(td);
+  select.disabled = false;
+}
+
+/* ---------- 导出 ---------- */
+async function exportResult() {
+  if (!requireApi()) return;
+  if (!RESULT) { status('请先完成数据处理', true); return; }
+  const outputDir = $('outputDir').value.trim();
+  if (!outputDir) { status('请先选择输出目录', true); return; }
+  const btn = $('exportBtn');
+  btn.disabled = true;
+  status('导出中...');
+  try {
+    const data = await api('/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outputDir }),
     });
-    body.appendChild(tr);
+    $('outputPath').textContent = data.outputPath;
+    status('导出完成');
+    log('输出：' + data.outputPath);
+  } catch (err) {
+    status('导出失败: ' + err.message, true);
+    log('[错误] ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- 趋势 ---------- */
+function showTrendEmpty() {
+  $('trendPlaceholder').hidden = false;
+  $('trendChartWrap').hidden = true;
+}
+
+async function loadTrend(variable) {
+  if (!RESULT) { showTrendEmpty(); return; }
+  if (!variable) { status('请先完成数据处理', true); return; }
+  try {
+    const data = await api('/api/trend?variable=' + encodeURIComponent(variable));
+    TREND = data;
+    $('trendVar').value = variable;
+    $('trendPlaceholder').hidden = true;
+    $('trendChartWrap').hidden = false;
+    drawTrend(data);
+  } catch (err) {
+    status('趋势加载失败: ' + err.message, true);
+  }
+}
+
+function drawTrend(data) {
+  const canvas = $('trendCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || 800;
+  const height = canvas.clientHeight || 420;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const times = data.time.map((t) => { const n = Date.parse(t); return Number.isFinite(n) ? n : null; });
+  const fallback = times.some((n) => n === null);
+  const raw = data.raw.map((v) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; });
+  const filtered = data.filtered.map((v) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; });
+  const values = [...raw, ...filtered].filter(Number.isFinite);
+  if (!times.length || !values.length) { showTrendEmpty(); return; }
+
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (min === max) { min -= 1; max += 1; }
+  const padY = (max - min) * 0.08;
+  min -= padY; max += padY;
+
+  const padL = 78, padR = 16, padT = 14, padB = 42;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+  const minT = Math.min(...times);
+  const maxT = Math.max(...times);
+  const xFor = (i) => padL + (fallback ? i / Math.max(1, times.length - 1) : (times[i] - minT) / Math.max(1, maxT - minT)) * plotW;
+  const yFor = (v) => padT + (1 - (v - min) / (max - min)) * plotH;
+
+  ctx.strokeStyle = '#dfe3e8';
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '11px Consolas, monospace';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = padT + plotH * i / 5;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(width - padR, y); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText((max - (max - min) * i / 5).toFixed(2), padL - 6, y + 4);
+  }
+  for (let i = 0; i <= 5; i++) {
+    const x = padL + plotW * i / 5;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, height - padB); ctx.stroke();
+    const j = Math.min(times.length - 1, Math.round(i * (times.length - 1) / 5));
+    ctx.textAlign = 'center';
+    const label = fallback ? String(j) : new Date(times[j]).toLocaleTimeString();
+    ctx.fillText(label, x, height - 16);
+  }
+
+  TREND_POINTS = [];
+  const drawLine = (values, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    values.forEach((v, i) => {
+      if (!Number.isFinite(v)) { started = false; return; }
+      const x = xFor(i), y = yFor(v);
+      if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+      TREND_POINTS.push({ x, y: y, raw: raw[i], filtered: filtered[i], time: data.time[i] });
+    });
+    ctx.stroke();
+  };
+  drawLine(raw, '#0a5f9c');
+  drawLine(filtered, '#d97706');
+}
+
+function bindTrendEvents() {
+  const select = $('trendVar');
+  if (select) select.addEventListener('change', () => loadTrend(select.value));
+  const canvas = $('trendCanvas');
+  if (!canvas) return;
+  canvas.addEventListener('mousemove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const point = TREND_POINTS.reduce((best, p) => Math.abs(p.x - x) < Math.abs(best.x - x) ? p : best, TREND_POINTS[0]);
+    if (!point) return;
+    const tip = $('trendTooltip');
+    tip.textContent = '时间: ' + point.time + '\n原始: ' + (Number.isFinite(point.raw) ? point.raw.toFixed(4) : '-') + '\n滤波: ' + (Number.isFinite(point.filtered) ? point.filtered.toFixed(4) : '-');
+    tip.style.left = (event.clientX - rect.left + 12) + 'px';
+    tip.style.top = (event.clientY - rect.top + 12) + 'px';
+    tip.style.display = 'block';
   });
-  $('resultWrap').hidden = false;
+  canvas.addEventListener('mouseleave', () => { $('trendTooltip').style.display = 'none'; });
+  window.addEventListener('resize', () => { if (TREND) drawTrend(TREND); });
 }
 
 /* ---------- 原生文件/目录选择 ---------- */
@@ -430,7 +639,7 @@ async function pickNative(mode) {
     }
     field.value = data.path;
     if (mode === 'file') {
-      if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+      if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[\/\\][^\/\\]+$/, '');
       await loadPreview();
     }
   } catch (err) {
@@ -460,6 +669,7 @@ let dragDepth = 0;
 
 async function uploadFile(file) {
   if (!requireApi()) return;
+  resetResult();
   status('上传中: ' + file.name);
   try {
     const data = await api('/api/upload?name=' + encodeURIComponent(file.name), {
@@ -467,7 +677,7 @@ async function uploadFile(file) {
       body: file,
     });
     $('inputPath').value = data.path;
-    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[\/\\][^\/\\]+$/, '');
     log(`拖放载入：${data.name}（${(data.size / 1024).toFixed(1)} KB） -> ${data.path}`);
     await loadPreview();
   } catch (err) {

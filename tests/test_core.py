@@ -7,11 +7,54 @@ import pandas as pd
 
 from core.filter import BUTTERWORTH, EWM, METHOD_LABELS, MOVING_AVERAGE, SAVGOL, filter_column
 from core.loader import load_file, to_datetime
-from core.processor import ProcessConfig, VariableConfig, process_file
+from core.processor import ProcessConfig, VariableConfig, process_data, process_file
 from core.resample import numeric_like_frame, resample
 
 
 class CoreProcessingTests(unittest.TestCase):
+    def test_process_data_builds_frame_without_creating_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=6, freq="min"),
+                    "A": [1, 3, 2, 5, 4, 6],
+                }
+            ).to_csv(source, index=False)
+            config = ProcessConfig(
+                resample_rule="2min",
+                variables={"A": VariableConfig(True, MOVING_AVERAGE, {"window": 3})},
+            )
+
+            result = process_data(source, config)
+
+            self.assertIsNone(result.output_path)
+            self.assertEqual(result.processed, ["A"])
+            self.assertIn("A_raw", result.frame.columns)
+            self.assertIn("A_filtered", result.frame.columns)
+            self.assertFalse(list(root.glob("*_processed.csv")))
+
+    def test_process_file_wrapper_still_exports_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=4, freq="min"),
+                    "A": [1, 2, 3, 4],
+                }
+            ).to_csv(source, index=False)
+            config = ProcessConfig(
+                variables={"A": VariableConfig(True, EWM, {"alpha": 0.5})}
+            )
+
+            result = process_file(source, root / "output", config)
+
+            self.assertIsNotNone(result.output_path)
+            self.assertTrue(Path(result.output_path).is_file())
+            self.assertEqual(result.output_path.name, "source_processed.csv")
+
     def test_gui_config_collection_passes_rule_selection_methods_and_params(self):
         from ui.app import App
 

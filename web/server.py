@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -21,9 +22,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from core import processor  # noqa: E402
+from core import exporter, processor  # noqa: E402
 from core.filter import DEFAULT_PARAMS, METHOD_LABELS, METHODS, format_params, parse_params  # noqa: E402
 from core.loader import SUPPORTED_SUFFIXES  # noqa: E402
 from core.resample import PRESET_RULES  # noqa: E402
@@ -32,11 +34,13 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 WEB_API_VERSION = 2
 UPLOAD_DIR = ROOT / "uploads"
+TREND_MAX_POINTS = 2000
 
 
 class ThreadingHTTPServer(_ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
         self.html_snapshot = (WEB_DIR / "index.html").read_bytes()
+        self.pending_result = None
         super().__init__(*args, **kwargs)
 
 
@@ -76,6 +80,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001 - 统一转成接口错误
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
+        if path == "/api/trend":
+            variable = parse_qs(route.query).get("variable", [""])[0].strip()
+            try:
+                self._json(_trend(self.server, variable))
+            except Exception as exc:  # noqa: BLE001 - 统一转成接口错误
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, status=400)
+            return
         self._json({"error": f"未知接口: {path}"}, status=404)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -86,6 +97,7 @@ class Handler(BaseHTTPRequestHandler):
             name = unquote(parse_qs(parsed.query).get("name", [""])[0])
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             try:
+                self.server.pending_result = None
                 self._json(_save_upload(name, body))
             except Exception as exc:  # noqa: BLE001
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, status=400)
@@ -98,9 +110,23 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/preview":
+                if self.server.pending_result is not None:
+                    self.server.pending_result = None
                 self._json(_preview(payload.get("path", "")))
             elif path == "/api/process":
-                self._json(_process(payload))
+                self.server.pending_result = None
+                result = _process(payload)
+                if not hasattr(result, "frame"):
+                    self._json(result)
+                    return
+                self.server.pending_result = {
+                    "frame": result.frame,
+                    "source_path": Path(result.source_path or payload.get("inputPath", "")),
+                    "valid": True,
+                }
+                self._json(_process_response(result))
+            elif path == "/api/export":
+                self._json(_export(self.server, payload))
             else:
                 self._json({"error": f"未知接口: {path}"}, status=404)
         except Exception as exc:  # noqa: BLE001 - 统一转成接口错误
@@ -207,11 +233,8 @@ def _preview(path: str) -> dict:
 
 def _process(payload: dict) -> dict:
     input_path = payload.get("inputPath", "").strip()
-    output_dir = payload.get("outputDir", "").strip()
     if not input_path:
         raise ValueError("请先选择输入文件")
-    if not output_dir:
-        raise ValueError("请先选择输出目录")
 
     config = processor.ProcessConfig(resample_rule=payload.get("rule", "").strip())
     for name, item in (payload.get("variables") or {}).items():
@@ -221,21 +244,81 @@ def _process(payload: dict) -> dict:
             params=parse_params(item.get("params", "")),
         )
 
-    result = processor.process_file(input_path, output_dir, config)
+    result = processor.process_data(input_path, config)
+    return result
 
-    head = result.frame.head(5).reset_index()
-    rows = [
-        [_jsonable(value) for value in record] for record in head.itertuples(index=False)
-    ]
+
+def _process_response(result) -> dict:
     return {
-        "outputPath": str(result.output_path),
         "rowsIn": result.rows_in,
         "rowsOut": result.rows_out,
         "processed": result.processed,
         "messages": result.messages,
-        "previewColumns": [str(column) for column in head.columns],
-        "previewRows": rows,
+        "exportable": True,
     }
+
+
+def _export(server, payload: dict) -> dict:
+    pending = _current_pending_result(server)
+    if pending is None:
+        raise ValueError("请先完成数据处理")
+    output_dir = payload.get("outputDir", "").strip()
+    if not output_dir:
+        raise ValueError("请先选择输出目录")
+    output_path = exporter.export_csv(
+        pending["frame"], output_dir, pending["source_path"]
+    )
+    return {"outputPath": str(output_path)}
+
+
+def _trend(server, variable: str) -> dict:
+    if not variable:
+        raise ValueError("请选择趋势变量")
+    pending = _current_pending_result(server)
+    if pending is None:
+        raise ValueError("请先完成数据处理")
+    frame = pending["frame"]
+    raw_name = f"{variable}{processor.RAW_SUFFIX}"
+    filtered_name = f"{variable}{processor.FILTERED_SUFFIX}"
+    if raw_name not in frame.columns or filtered_name not in frame.columns:
+        raise ValueError("该变量没有可用的处理结果")
+    index = frame.index
+    raw = pd.to_numeric(frame[raw_name], errors="coerce").to_numpy()
+    filtered = pd.to_numeric(frame[filtered_name], errors="coerce").to_numpy()
+    if len(index) > TREND_MAX_POINTS:
+        per_block = max(1, (TREND_MAX_POINTS - 2) // 2)
+        step = int(math.ceil(len(index) / per_block))
+        # 每块在 raw/filtered 合并后保留最大、最小样本并补首尾，尽量保留峰谷
+        step_indices = [0, len(index) - 1]
+        for start in range(0, len(index), step):
+            end = min(start + step, len(index))
+            block_len = end - start
+            local_values = np.nan_to_num(
+                np.concatenate((raw[start:end], filtered[start:end])), nan=0.0
+            )
+            min_pos = int(np.argmin(local_values)) % block_len
+            max_pos = int(np.argmax(local_values)) % block_len
+            step_indices.append(start + min_pos)
+            step_indices.append(start + max_pos)
+        pick = sorted(set(step_indices))
+        index = index[pick]
+        raw = raw[pick]
+        filtered = filtered[pick]
+    return {
+        "variable": variable,
+        "time": [_jsonable(value) for value in index],
+        "raw": [_jsonable(value) for value in raw],
+        "filtered": [_jsonable(value) for value in filtered],
+    }
+
+
+def _current_pending_result(server):
+    pending = getattr(server, "pending_result", None)
+    if not pending or not pending["valid"]:
+        return None
+    if not pending["source_path"].is_file():
+        return None
+    return pending
 
 
 def _jsonable(value):

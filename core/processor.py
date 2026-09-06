@@ -48,19 +48,19 @@ class ProcessResult:
     rows_out: int = 0
     processed: list[str] = field(default_factory=list)
     time_range: str = "-"
+    source_path: Path | None = None
 
 
 RAW_SUFFIX = "_raw"
 FILTERED_SUFFIX = "_filtered"
 
 
-def process_file(
+def process_data(
     input_path: str | Path,
-    output_dir: str | Path,
     config: ProcessConfig,
     progress=None,
 ) -> ProcessResult:
-    """执行完整流程并导出 CSV。"""
+    """读取 → 时间排序 → 重采样 → 指定变量滤波，不写文件。"""
     messages: list[str] = []
 
     loaded = load_file(input_path)
@@ -116,18 +116,30 @@ def process_file(
     if skipped:
         messages.append(f"以下变量在重采样后不存在，已跳过: {', '.join(skipped)}")
 
-    output_path = exporter.export_csv(output, output_dir, loaded.source)
-    _report(progress, f"已写出 {output_path}")
-
     return ProcessResult(
         frame=output,
-        output_path=output_path,
+        output_path=None,
         messages=messages,
         rows_in=loaded.rows,
         rows_out=len(output),
         processed=processed,
         time_range=f"{output.index.min()} ~ {output.index.max()}" if len(output) else "-",
+        source_path=Path(loaded.source),
     )
+
+
+def process_file(
+    input_path: str | Path,
+    output_dir: str | Path,
+    config: ProcessConfig,
+    progress=None,
+) -> ProcessResult:
+    """兼容入口：执行完整流程并导出 CSV。"""
+    result = process_data(input_path, config, progress)
+    output_path = exporter.export_csv(result.frame, output_dir, result.source_path or input_path)
+    result.output_path = output_path
+    _report(progress, f"已写出 {output_path}")
+    return result
 
 
 def inspect_file(input_path: str | Path) -> LoadResult:

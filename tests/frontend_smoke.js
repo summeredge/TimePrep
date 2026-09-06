@@ -18,13 +18,13 @@ function makeElement(tag, id) {
     dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach(fn => fn(ev)); return true; },
   };
   if (id) { elements[id] = el; }
-  if (id === "runBtn" || id === "reconnectBtn") { buttons[id] = el; }
+  if (id === "runBtn" || id === "reconnectBtn" || id === "exportBtn") { buttons[id] = el; }
   return el;
 }
 const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","status","log","previewCard","configCard",
-             "pFile","pRows","pTimeCol","pRange","pVars","varBody","resultHead","resultBody","resultWrap",
-             "outputPath","runBtn","reconnectBtn"];
-ids.forEach(id => makeElement(id === "runBtn" || id === "reconnectBtn" ? "button" : "div", id));
+             "pFile","pRows","pTimeCol","pRange","pVars","varBody","outputPath","runBtn","reconnectBtn",
+             "exportBtn","trendVar","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
+ids.forEach(id => makeElement((id === "runBtn" || id === "reconnectBtn" || id === "exportBtn") ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : "div")), id));
 const documentShim = {
   getElementById(id) { return elements[id] || null; },
   createElement(tag) { return makeElement(tag); },

@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import pandas as pd
+
 from web import server as web_server
 
 
@@ -25,6 +27,9 @@ class WebApiTests(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.thread.join(timeout=2)
+
+    def setUp(self):
+        self.httpd.pending_result = None
 
     def request(self, method, path, payload=None):
         body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -106,6 +111,184 @@ class WebApiTests(unittest.TestCase):
             status, result = self.request("POST", "/api/process", {})
         self.assertEqual((status, result), (200, {"processed": True}))
 
+    def test_api_process_needs_no_output_dir_and_does_not_create_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=4, freq="min"),
+                    "A": [1.0, 2.0, 3.0, 4.0],
+                }
+            ).to_csv(source, index=False)
+
+            status, result = self.request(
+                "POST",
+                "/api/process",
+                {
+                    "inputPath": str(source),
+                    "rule": "",
+                    "variables": {
+                        "A": {
+                            "enabled": True,
+                            "method": "ewm",
+                            "params": "alpha=0.5",
+                        }
+                    },
+                },
+            )
+            self.assertFalse(list(root.glob("*_processed.csv")))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["processed"], ["A"])
+        self.assertEqual(result["exportable"], True)
+        self.assertIsNone(result.get("outputPath"))
+        self.assertNotIn("previewColumns", result)
+        self.assertNotIn("previewRows", result)
+
+    def test_api_export_uses_cached_result_and_source_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=4, freq="min"),
+                    "A": [1.0, 2.0, 3.0, 4.0],
+                }
+            ).to_csv(source, index=False)
+            self._process_source(source)
+
+            status, result = self.request(
+                "POST", "/api/export", {"outputDir": str(root / "output")}
+            )
+
+            self.assertEqual(status, 200)
+            exported = Path(result["outputPath"])
+            self.assertEqual(exported.name, "source_processed.csv")
+            self.assertTrue(exported.is_file())
+
+    def test_api_trend_returns_raw_filtered_on_shared_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            expected_time = pd.date_range("2026-09-01 10:00", periods=4, freq="min")
+            pd.DataFrame(
+                {"Time": expected_time, "A": [1.0, 2.0, 3.0, 4.0]}
+            ).to_csv(source, index=False)
+            self._process_source(source)
+
+            status, result = self.request("GET", "/api/trend?variable=A")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["variable"], "A")
+        self.assertEqual(len(result["time"]), 4)
+        self.assertEqual(
+            [str(value) for value in result["time"]],
+            [str(value) for value in expected_time],
+        )
+        self.assertEqual(result["raw"], [1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(len(result["filtered"]), 4)
+
+    def test_api_trend_downsamples_long_series_within_display_cap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            index = pd.date_range("2026-09-01 10:00", periods=50_000, freq="s")
+            pd.DataFrame({"Time": index, "A": range(50_000)}).to_csv(source, index=False)
+            self._process_source(source)
+
+            status, result = self.request("GET", "/api/trend?variable=A")
+
+        self.assertEqual(status, 200, result)
+        self.assertLessEqual(len(result["time"]), web_server.TREND_MAX_POINTS)
+        self.assertEqual(len(result["raw"]), len(result["time"]))
+        self.assertEqual(len(result["filtered"]), len(result["time"]))
+        self.assertEqual(str(result["time"][0]), str(index[0]))
+        self.assertEqual(str(result["time"][-1]), str(index[-1]))
+
+    def test_api_export_and_trend_reject_without_result(self):
+        status, result = self.request(
+            "POST", "/api/export", {"outputDir": r"C:\out"}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("请先完成数据处理", result["error"])
+
+        status, result = self.request("GET", "/api/trend?variable=A")
+        self.assertEqual(status, 400)
+        self.assertIn("请先完成数据处理", result["error"])
+
+    def test_previewing_new_file_invalidates_cached_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            other = root / "other.csv"
+            pd.DataFrame(
+                {"Time": pd.date_range("2026-09-01", periods=2, freq="min"), "A": [1, 2]}
+            ).to_csv(source, index=False)
+            pd.DataFrame(
+                {"Time": pd.date_range("2026-09-02", periods=2, freq="min"), "A": [3, 4]}
+            ).to_csv(other, index=False)
+            self._process_source(source)
+
+            preview_status, _ = self.request("POST", "/api/preview", {"path": str(other)})
+            self.assertEqual(preview_status, 200)
+            export_status, export_result = self.request(
+                "POST", "/api/export", {"outputDir": str(root / "output")}
+            )
+            trend_status, trend_result = self.request("GET", "/api/trend?variable=A")
+
+        self.assertIsNone(self.httpd.pending_result)
+        self.assertEqual(export_status, 400)
+        self.assertIn("请先完成数据处理", export_result["error"])
+        self.assertEqual(trend_status, 400)
+        self.assertIn("请先完成数据处理", trend_result["error"])
+
+    def test_failed_process_invalidates_cached_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            pd.DataFrame(
+                {"Time": pd.date_range("2026-09-01", periods=2, freq="min"), "A": [1, 2]}
+            ).to_csv(source, index=False)
+            self._process_source(source)
+
+            process_status, _ = self.request(
+                "POST",
+                "/api/process",
+                {
+                    "inputPath": str(root / "missing.csv"),
+                    "rule": "",
+                    "variables": {},
+                },
+            )
+            export_status, export_result = self.request(
+                "POST", "/api/export", {"outputDir": str(root / "output")}
+            )
+
+        self.assertEqual(process_status, 400)
+        self.assertIsNone(self.httpd.pending_result)
+        self.assertEqual(export_status, 400)
+        self.assertIn("请先完成数据处理", export_result["error"])
+
+    def _process_source(self, source):
+        status, result = self.request(
+            "POST",
+            "/api/process",
+            {
+                "inputPath": str(source),
+                "rule": "",
+                "variables": {
+                    "A": {
+                        "enabled": True,
+                        "method": "ewm",
+                        "params": "alpha=0.5",
+                    }
+                },
+            },
+        )
+        self.assertEqual(status, 200, result)
+        return result
+
     def test_page_is_frozen_at_server_start(self):
         with tempfile.TemporaryDirectory() as directory:
             web_dir = Path(directory)
@@ -139,6 +322,26 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(response.getheader("Cache-Control"), "no-store")
+
+    def test_frontend_has_trend_workspace_and_export_but_no_result_table(self):
+        page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
+        script = page[page.index("<script>") : page.index("</script>")]
+
+        self.assertIn("趋势对比", page)
+        self.assertIn('id="trendVar"', page)
+        self.assertIn('id="trendCanvas"', page)
+        self.assertIn('id="exportBtn"', page)
+        self.assertIn("async function exportResult", script)
+        self.assertIn("async function loadTrend", script)
+        self.assertIn("JSON.stringify({ inputPath, rule, variables })", script)
+        self.assertIn(
+            "grid-template-columns: minmax(0, 42fr) minmax(0, 58fr)", page
+        )
+        self.assertNotIn("载入预览", page)
+        self.assertNotIn("resultWrap", page)
+        self.assertNotIn("resultHead", page)
+        self.assertNotIn("resultBody", page)
+        self.assertNotIn("renderResult()", page)
 
     def test_frontend_has_no_global_permanent_button_disable(self):
         page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
