@@ -69,9 +69,8 @@ def process_file(
         messages.append(f"丢弃 {loaded.dropped_rows} 行时间无法解析的数据")
     messages.append(f"时间列: {loaded.time_column}；时间范围: {loaded.time_range_text}")
 
-    numeric_columns = [
-        c for c in loaded.frame.columns if pd.api.types.is_numeric_dtype(loaded.frame[c])
-    ]
+    numeric_columns = list(resample_module.numeric_like_frame(loaded.frame).columns)
+    numeric_names = {str(column) for column in numeric_columns}
     # 不重采样时保留全部列（含非数值列）；重采样后才按需求忽略非数值列
     if config.resample_rule and len(numeric_columns) < len(loaded.frame.columns):
         dropped = [c for c in loaded.frame.columns if c not in numeric_columns]
@@ -94,7 +93,7 @@ def process_file(
     for column in frame.columns:
         name = str(column)
         cfg = config.variables.get(name)
-        if cfg is None or not cfg.enabled:
+        if name not in numeric_names or cfg is None or not cfg.enabled:
             output[name] = frame[column]  # 未选择：原样输出
             continue
 

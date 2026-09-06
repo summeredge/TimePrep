@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 
 from core.filter import BUTTERWORTH, EWM, METHOD_LABELS, MOVING_AVERAGE, SAVGOL, filter_column
-from core.loader import load_file
+from core.loader import load_file, to_datetime
 from core.processor import ProcessConfig, VariableConfig, process_file
-from core.resample import resample
+from core.resample import numeric_like_frame, resample
 
 
 class CoreProcessingTests(unittest.TestCase):
@@ -82,6 +82,76 @@ class CoreProcessingTests(unittest.TestCase):
         np.testing.assert_allclose(result["A"].to_numpy(), [1.5, 3.0])
         self.assertNotIn("Text", result.columns)
 
+    def test_numeric_like_columns_keep_bad_values_as_nan(self):
+        frame = pd.DataFrame(
+            {
+                "TIC101": [85.1, 85.3, "Bad", 85.4],
+                "Mode": ["AUTO", "AUTO", "AUTO", "MAN"],
+            }
+        )
+
+        result = numeric_like_frame(frame)
+
+        self.assertIn("TIC101", result.columns)
+        self.assertNotIn("Mode", result.columns)
+        self.assertTrue(pd.isna(result.loc[2, "TIC101"]))
+
+    def test_scan_off_column_survives_resampling_as_nan(self):
+        index = pd.date_range("2026-09-01 10:00", periods=4, freq="min")
+        frame = pd.DataFrame({"TIC101": [85.1, 85.3, "Scan Off", 85.4]}, index=index)
+
+        result = resample(frame, "1min")
+
+        self.assertIn("TIC101", result.columns)
+        self.assertTrue(pd.isna(result.loc[index[2], "TIC101"]))
+
+    def test_mixed_datetime_formats_parse_and_invalid_time_is_dropped(self):
+        values = pd.Series(
+            [
+                "2026-09-01 10:00:00",
+                "2026/09/01 10:01",
+                "2026-09-01T10:02:00",
+                "not-a-time",
+            ]
+        )
+
+        parsed = to_datetime(values)
+
+        self.assertEqual(parsed.notna().tolist(), [True, True, True, False])
+        self.assertEqual(parsed.iloc[1], pd.Timestamp("2026-09-01 10:01:00"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mixed.csv"
+            pd.DataFrame({"Time": values, "A": [1, 2, 3, 4]}).to_csv(path, index=False)
+            loaded = load_file(path)
+
+        self.assertEqual(loaded.rows, 3)
+        self.assertEqual(loaded.dropped_rows, 1)
+
+    def test_numeric_like_column_processes_and_exports_raw_filtered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "industrial.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=6, freq="min"),
+                    "TIC101": [85.1, 85.3, "Bad", 85.4, 85.5, 85.6],
+                    "Mode": ["AUTO", "AUTO", "AUTO", "MAN", "MAN", "MAN"],
+                }
+            ).to_csv(source, index=False)
+            config = ProcessConfig(
+                resample_rule="1min",
+                variables={"TIC101": VariableConfig(True, EWM, {"alpha": 0.5})},
+            )
+
+            result = process_file(source, root / "output", config)
+            exported = pd.read_csv(result.output_path)
+
+        self.assertEqual(result.processed, ["TIC101"])
+        self.assertEqual(list(exported.columns), ["Time", "TIC101_raw", "TIC101_filtered"])
+        self.assertTrue(pd.isna(exported.loc[2, "TIC101_raw"]))
+        self.assertTrue(pd.isna(exported.loc[2, "TIC101_filtered"]))
+
     def test_filter_methods_return_same_index_and_change_series(self):
         index = pd.date_range("2024-01-01", periods=40, freq="s")
         series = pd.Series(np.sin(np.linspace(0, 8, len(index))) + np.tile([0.0, 1.0], 20), index=index)
@@ -146,18 +216,32 @@ class CoreProcessingTests(unittest.TestCase):
             root = Path(directory)
             source = root / "source.csv"
             pd.DataFrame(
-                {"Timestamp": pd.date_range("2024-01-01", periods=4, freq="min"), "A": [1, 2, 3, 4], "B": [10, 20, 30, 40]}
+                {
+                    "Timestamp": pd.date_range("2024-01-01", periods=4, freq="min"),
+                    "A": [1, 2, 3, 4],
+                    "B": [10, 20, 30, 40],
+                    "Mode": ["AUTO", "AUTO", "MAN", "MAN"],
+                }
             ).to_csv(source, index=False)
             result = process_file(
                 source,
                 root / "output",
-                ProcessConfig(variables={"A": VariableConfig(True, EWM, {"alpha": 0.5}), "B": VariableConfig()}),
+                ProcessConfig(
+                    variables={
+                        "A": VariableConfig(True, EWM, {"alpha": 0.5}),
+                        "B": VariableConfig(),
+                        "Mode": VariableConfig(True, EWM, {"alpha": 0.5}),
+                    }
+                ),
             )
 
         self.assertEqual(result.processed, ["A"])
         self.assertEqual(list(result.frame["B"]), [10, 20, 30, 40])
+        self.assertEqual(list(result.frame["Mode"]), ["AUTO", "AUTO", "MAN", "MAN"])
         self.assertNotIn("B_raw", result.frame.columns)
         self.assertNotIn("B_filtered", result.frame.columns)
+        self.assertNotIn("Mode_raw", result.frame.columns)
+        self.assertNotIn("Mode_filtered", result.frame.columns)
 
 
 if __name__ == "__main__":

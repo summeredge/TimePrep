@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from core import processor
 from core.filter import DEFAULT_PARAMS, METHOD_LABELS, METHODS, format_params, parse_params
-from core.resample import PRESET_RULES
+from core.resample import PRESET_RULES, numeric_like_frame
 
 FILE_TYPES = [
     ("数据文件", "*.csv *.txt *.xls *.xlsx *.xlsm"),
@@ -171,11 +171,12 @@ class App:
         self.info["rows"].set(f"{loaded.rows} 行")
         self.info["range"].set(loaded.time_range_text)
         self.info["time"].set(loaded.time_column)
-        self.info["vars"].set(f"{len(loaded.columns)} 个")
-        self._set_text(self.variable_text, "、".join(loaded.columns))
+        processable = numeric_like_frame(loaded.frame)
+        self.info["vars"].set(f"{len(processable.columns)} 个")
+        self._set_text(self.variable_text, "、".join(map(str, processable.columns)) or "-")
 
-        self._build_variable_rows(loaded.frame)
-        self.status_var.set(f"已载入 {loaded.source.name}，共 {len(loaded.columns)} 个变量")
+        self._build_variable_rows(processable)
+        self.status_var.set(f"已载入 {loaded.source.name}，共 {len(processable.columns)} 个可处理变量")
         self._log(f"读取成功：{loaded.source.name}，{loaded.rows} 行，时间列 {loaded.time_column}\n")
 
     def _build_variable_rows(self, frame) -> None:

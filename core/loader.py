@@ -83,9 +83,9 @@ def load_file(path: str | Path) -> LoadResult:
 def to_datetime(values: pd.Series) -> pd.Series:
     """解析时间列；无法解析的位置为 NaT。兼容混合时间格式（pandas >= 2 严格模式）。"""
     try:
-        return pd.to_datetime(values, errors="coerce")
-    except ValueError:
         return pd.to_datetime(values, errors="coerce", format="mixed")
+    except (TypeError, ValueError):
+        return pd.to_datetime(values, errors="coerce")
 
 
 def _read_raw(source: Path) -> pd.DataFrame:
