@@ -6,7 +6,7 @@
 
 import sys
 
-REQUIRED = ("pandas", "numpy", "scipy", "openpyxl", "matplotlib")
+REQUIRED = ("pandas", "numpy", "scipy", "openpyxl", "xlrd", "matplotlib")
 
 
 def main() -> int:

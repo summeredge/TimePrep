@@ -276,6 +276,7 @@ class App:
             self.root.update_idletasks()
 
         try:
+            config = self._collect_config()
             result = processor.process_file(input_path, output_dir, config, progress=progress)
         except Exception as exc:  # noqa: BLE001 - GUI 中统一展示失败原因
             self.status_var.set("处理失败")
