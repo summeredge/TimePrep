@@ -64,26 +64,6 @@
     border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
     font: 12px/1.7 Consolas, monospace; white-space: pre-wrap; color: #333;
   }
-  .modal {
-    position: fixed; inset: 0; background: rgba(0,0,0,.35);
-    display: flex; align-items: center; justify-content: center; z-index: 10;
-  }
-  .modal .box {
-    background: #fff; border-radius: 8px; width: 640px; max-width: 92vw;
-    max-height: 80vh; display: flex; flex-direction: column; padding: 16px;
-    pointer-events: auto;
-  }
-  .modal .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-  .modal .head h3 { margin: 0; font-size: 15px; }
-  .modal .cur { font: 12px Consolas, monospace; color: var(--muted); margin-bottom: 8px; word-break: break-all; }
-  .modal ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
-  .modal li {
-    padding: 5px 8px; cursor: pointer; border-radius: 4px;
-    font-family: Consolas, monospace; font-size: 13px;
-  }
-  .modal li:hover { background: var(--accent-soft); }
-  .modal li.dir::before { content: "[目录] "; color: var(--accent); }
-  .modal .foot { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
   .err { color: #b3261e; }
   #dropOverlay {
     position: fixed; inset: 0; z-index: 20; display: none;
@@ -93,9 +73,6 @@
   }
   #dropOverlay.on { display: flex; }
 
-  /* 防止 .modal 的 display:flex 覆盖 HTML hidden 属性，导致弹窗关不掉 */
-  .modal[hidden] { display: none; }
-  .box [hidden] { display: none; }
 </style>
 </head>
 <body data-page-node-id="E7NksKgHewYfOKgvxWsIAZ">
@@ -110,12 +87,12 @@
     <div class="row" data-page-node-id="7QS4mJRRJeww8U9VRagvoa">
       <label data-page-node-id="Y2JkI4SR6yPngaabCdjH9s">输入文件</label>
       <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件" data-page-node-id="fV7Q3reYkeHO05ftcPWkdQ">
-      <button onclick="openPicker('file')" data-page-node-id="ri8PZdBjkyXlMZ5QSnHtt5">浏览...</button>
+      <button onclick="pickNative('file')" data-page-node-id="ri8PZdBjkyXlMZ5QSnHtt5">浏览...</button>
     </div>
     <div class="row" data-page-node-id="idwr6EAC56XWWKZocmnZVq">
       <label data-page-node-id="iKjQlKYHFY07gBrQIZhKP9">输出目录</label>
       <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录" data-page-node-id="Xog4uS6zswopGhS6HZORiS">
-      <button onclick="openPicker('dir')" data-page-node-id="XBFyZ1W5eqkBQJ8lsdR6Do">浏览...</button>
+      <button onclick="pickNative('dir')" data-page-node-id="XBFyZ1W5eqkBQJ8lsdR6Do">浏览...</button>
       <button onclick="loadPreview()" data-page-node-id="VbpTnqtVZCmXv0xW6Y98Ba">载入预览</button>
     </div>
     <p class="hint" data-page-node-id="hXBCSNcegRwl1voxZbEE0a">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b data-page-node-id="pkTk18eVIpfiAZtVy5Nawt">直接拖放到本页任意位置</b>（会复制一份到项目 uploads 目录，原文件不动）。</p>
@@ -169,28 +146,10 @@
 
 <div id="dropOverlay" data-page-node-id="pQCcZEvJwqMnBNIy8m5DD3">松开鼠标，载入数据文件</div>
 
-<div class="modal" id="modal" hidden data-page-node-id="FSeANG1es38aNtsCZeKUDu">
-  <div class="box" data-page-node-id="BnykudwRfCDX8Zv2jYzS5e">
-    <div class="head" data-page-node-id="yPEcU5gpI6kph90s52xRYc">
-      <h3 id="modalTitle" data-page-node-id="R6rd0yyo4H2bo2G1KRkk7y">选择</h3>
-      <button onclick="closePicker()" data-page-node-id="ZQO0iX5epWY3V0jdHgvqC9">关闭</button>
-    </div>
-    <div class="cur" id="modalPath" data-page-node-id="fHik3JDUzfx1NJLaBhdUUo"></div>
-    <ul id="modalList" data-page-node-id="8ZpovITb7B9boGoIJgAePE"></ul>
-    <div class="foot" data-page-node-id="CzExoDB0stVuClxgY6tFXy">
-      <button onclick="pickParent()" data-page-node-id="AXApPv9LS4K5RA7F055lOD">向上一级</button>
-      <button id="pickDirBtn" onclick="pickCurrentDir()" data-page-node-id="IwBh6xPn14k40pLDM0z435">选择当前目录</button>
-    </div>
-  </div>
-</div>
-
 <script>
 let METHODS = [];
 let COLUMNS = [];
 let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params }
-let pickerMode = 'file';
-let pickerCurrent = '';
-
 const $ = (id) => document.getElementById(id);
 
 async function api(url, options) {
@@ -380,61 +339,25 @@ function renderResult(data) {
   $('resultWrap').hidden = false;
 }
 
-/* ---------- 文件选择 ---------- */
-function openPicker(mode) {
-  pickerMode = mode;
-  $('modalTitle').textContent = mode === 'file' ? '选择输入文件' : '选择输出目录';
-  $('pickDirBtn').hidden = mode !== 'dir';
-  $('modal').hidden = false;
-  const start = (mode === 'file' ? $('inputPath').value : $('outputDir').value).trim();
-  listDir(start || '');
-}
-
-function closePicker() { $('modal').hidden = true; }
-
-async function listDir(path) {
+/* ---------- 原生文件/目录选择 ---------- */
+async function pickNative(mode) {
+  const field = mode === 'file' ? $('inputPath') : $('outputDir');
   try {
-    const data = await api('/api/list?path=' + encodeURIComponent(path));
-    pickerCurrent = data.path;
-    $('modalPath').textContent = data.path;
-    const ul = $('modalList');
-    ul.textContent = '';
-    data.entries.forEach((entry) => {
-      const li = document.createElement('li');
-      li.textContent = entry.name;
-      if (entry.type === 'dir') {
-        li.className = 'dir';
-        li.onclick = () => listDir(entry.path);
-      } else {
-        li.onclick = () => {
-          $('inputPath').value = entry.path;
-          loadPreview();
-          closePicker();
-        };
-      }
-      ul.appendChild(li);
-    });
+    const data = await api(`/api/pick-${mode}?path=${encodeURIComponent(field.value.trim())}`);
+    if (data.cancelled) {
+      status('已取消选择');
+      return;
+    }
+    field.value = data.path;
+    if (mode === 'file') {
+      if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+      await loadPreview();
+    }
   } catch (err) {
+    status('选择失败: ' + err.message, true);
     log('[错误] ' + err.message);
   }
 }
-
-function pickParent() {
-  const parent = pickerCurrent.replace(/[/\\][^/\\]*$/, '');
-  if (parent && parent !== pickerCurrent) listDir(parent);
-}
-
-function pickCurrentDir() {
-  $('outputDir').value = pickerCurrent;
-  closePicker();
-}
-
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
-
-/* 点击弹窗半透明背景也关闭 */
-$('modal').addEventListener('click', (e) => {
-  if (e.target === $('modal')) closePicker();
-});
 
 /* ---------- 拖放文件 ---------- */
 /* 浏览器不暴露本地绝对路径，拖放只能拿到文件内容，因此上传一份副本到 uploads 目录 */

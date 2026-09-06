@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -54,10 +55,14 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if path == "/api/list":
+        if path in ("/api/pick-file", "/api/pick-dir"):
             query = parse_qs(route.query)
-            target = unquote(query.get("path", [""])[0]) or str(Path.home())
-            self._json(_list_dir(target))
+            initial_path = query.get("path", [""])[0]
+            mode = "file" if path.endswith("file") else "dir"
+            try:
+                self._json(_pick_native(mode, initial_path))
+            except Exception as exc:  # noqa: BLE001 - 统一转成接口错误
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
         self._json({"error": f"未知接口: {path}"}, status=404)
 
@@ -123,32 +128,51 @@ def _save_upload(name: str, body: bytes) -> dict:
     return {"path": str(target), "name": safe, "size": len(body)}
 
 
-def _list_dir(target: str) -> dict:
-    directory = Path(target).expanduser()
-    if not directory.exists():
-        directory = Path.home()
-    if directory.is_file():
-        directory = directory.parent
-
-    dirs: list[dict] = []
-    files: list[dict] = []
+def _parse_dialog_result(stdout: str) -> dict:
     try:
-        for item in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
-            if item.name.startswith("."):
-                continue
-            if item.is_dir():
-                dirs.append({"name": item.name, "path": str(item), "type": "dir"})
-            elif item.suffix.lower() in SUPPORTED_SUFFIXES:
-                files.append({"name": item.name, "path": str(item), "type": "file"})
-    except PermissionError:
-        return {"error": f"无访问权限: {directory}", "path": str(directory), "entries": []}
+        result = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("原生选择框返回了无效结果") from exc
 
-    parent = directory.parent
-    return {
-        "path": str(directory),
-        "parent": str(parent) if parent != directory else None,
-        "entries": dirs + files,
-    }
+    if not isinstance(result, dict):
+        raise RuntimeError("原生选择框返回了无效结果")
+    if result.get("cancelled") is True:
+        return {"cancelled": True}
+
+    selected = result.get("path")
+    if not isinstance(selected, str) or not selected.strip():
+        raise RuntimeError("原生选择框未返回路径")
+    return {"path": selected.strip()}
+
+
+def _run_native_dialog(mode: str, initial_path: str) -> dict:
+    command = [sys.executable, str(WEB_DIR / "native_dialog.py"), mode]
+    if initial_path:
+        command.extend(("--initial", initial_path))
+
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("原生选择框超时") from exc
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(detail or f"helper 退出码 {completed.returncode}")
+    return _parse_dialog_result(completed.stdout)
+
+
+def _pick_native(mode: str, initial_path: str) -> dict:
+    result = _run_native_dialog(mode, initial_path)
+    if result.get("cancelled"):
+        return result
+    return {"path": str(Path(result["path"]).expanduser().resolve())}
 
 
 def _preview(path: str) -> dict:
