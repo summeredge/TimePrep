@@ -147,15 +147,22 @@
 <div id="dropOverlay" data-page-node-id="pQCcZEvJwqMnBNIy8m5DD3">松开鼠标，载入数据文件</div>
 
 <script>
+const EXPECTED_API_VERSION = 2;
 let METHODS = [];
 let COLUMNS = [];
 let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params }
+let apiReady = false;
+let versionMismatch = false;
 const $ = (id) => document.getElementById(id);
 
 async function api(url, options) {
   const res = await fetch(url, options);
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  if (data.error) {
+    const error = new Error(data.error);
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -169,10 +176,27 @@ function status(text, isError) {
   $('status').className = isError ? 'err' : '';
 }
 
+function showVersionMismatch() {
+  versionMismatch = true;
+  apiReady = false;
+  document.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+  status('TimePrep 前后端版本不一致，请重新启动 TimePrep 服务。', true);
+}
+
+function requireApi() {
+  if (apiReady) return true;
+  if (!versionMismatch) status('服务初始化中，请稍候', true);
+  return false;
+}
+
 /* ---------- 初始化 ---------- */
 (async function init() {
   try {
     const meta = await api('/api/methods');
+    if (meta.apiVersion !== EXPECTED_API_VERSION) {
+      showVersionMismatch();
+      return;
+    }
     METHODS = meta.methods;
     const select = $('ruleSelect');
     meta.presetRules.forEach((rule) => {
@@ -181,13 +205,19 @@ function status(text, isError) {
       opt.textContent = rule === '' ? '不重采样' : rule;
       select.appendChild(opt);
     });
+    apiReady = true;
   } catch (err) {
-    status('无法连接服务: ' + err.message, true);
+    if (err.status === 404) {
+      showVersionMismatch();
+    } else {
+      status('无法连接服务: ' + err.message, true);
+    }
   }
 })();
 
 /* ---------- 预览 ---------- */
 async function loadPreview() {
+  if (!requireApi()) return;
   const path = $('inputPath').value.trim();
   if (!path) { status('请先选择输入文件', true); return; }
   status('读取中...');
@@ -279,6 +309,7 @@ function updateSelection() {
 
 /* ---------- 执行 ---------- */
 async function run() {
+  if (!requireApi()) return;
   const inputPath = $('inputPath').value.trim();
   const outputDir = $('outputDir').value.trim();
   if (!inputPath) { status('请先选择输入文件', true); return; }
@@ -341,6 +372,7 @@ function renderResult(data) {
 
 /* ---------- 原生文件/目录选择 ---------- */
 async function pickNative(mode) {
+  if (!requireApi()) return;
   const field = mode === 'file' ? $('inputPath') : $('outputDir');
   try {
     const data = await api(`/api/pick-${mode}?path=${encodeURIComponent(field.value.trim())}`);
@@ -379,6 +411,7 @@ let dragDepth = 0;
 });
 
 async function uploadFile(file) {
+  if (!requireApi()) return;
   status('上传中: ' + file.name);
   try {
     const data = await api('/api/upload?name=' + encodeURIComponent(file.name), {

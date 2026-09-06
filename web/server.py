@@ -12,7 +12,8 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import HTTPConnection, HTTPException
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -29,7 +30,14 @@ from core.resample import PRESET_RULES  # noqa: E402
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+WEB_API_VERSION = 2
 UPLOAD_DIR = ROOT / "uploads"
+
+
+class ThreadingHTTPServer(_ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.html_snapshot = (WEB_DIR / "index.html").read_bytes()
+        super().__init__(*args, **kwargs)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,11 +46,15 @@ class Handler(BaseHTTPRequestHandler):
         path = route.path
 
         if path in ("/", "/index.html"):
-            self._html(WEB_DIR / "index.html")
+            self._html()
+            return
+        if path == "/api/health":
+            self._json({"app": "TimePrep", "apiVersion": WEB_API_VERSION, "pid": os.getpid()})
             return
         if path == "/api/methods":
             self._json(
                 {
+                    "apiVersion": WEB_API_VERSION,
                     "methods": [
                         {
                             "key": key,
@@ -95,8 +107,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(exc).__name__}: {exc}"}, status=400)
 
     # ---------- 输出 ----------
-    def _html(self, file: Path) -> None:
-        body = file.read_bytes()
+    def _html(self) -> None:
+        body = self.server.html_snapshot
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -242,19 +254,67 @@ def _jsonable(value):
     return str(value)
 
 
-def main() -> None:
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("ITST_PORT", DEFAULT_PORT))
-    url = f"http://{HOST}:{port}/"
+def _is_compatible_timeprep(port: int) -> bool:
+    connection = HTTPConnection(HOST, port, timeout=0.5)
     try:
-        server = ThreadingHTTPServer((HOST, port), Handler)
+        connection.request("GET", "/api/health")
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        data = json.loads(response.read(4096).decode("utf-8"))
+        return (
+            isinstance(data, dict)
+            and data.get("app") == "TimePrep"
+            and data.get("apiVersion") == WEB_API_VERSION
+        )
+    except (HTTPException, OSError, TypeError, ValueError):
+        return False
+    finally:
+        connection.close()
+
+
+def _create_server(port: int, auto_select: bool) -> ThreadingHTTPServer | None:
+    try:
+        return ThreadingHTTPServer((HOST, port), Handler)
+    except OSError as exc:
+        if not auto_select:
+            raise
+        if _is_compatible_timeprep(port):
+            return None
+        for candidate in range(port + 1, 65536):
+            try:
+                return ThreadingHTTPServer((HOST, candidate), Handler)
+            except OSError:
+                continue
+        raise exc
+
+
+def main() -> None:
+    explicit_port = len(sys.argv) > 1 or "ITST_PORT" in os.environ
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("ITST_PORT", DEFAULT_PORT))
+    try:
+        server = _create_server(port, auto_select=not explicit_port)
     except OSError as exc:
         print(f"无法启动服务: {exc}")
-        print(f"请更换端口后重试，例如: python web/server.py {port + 1}")
+        if explicit_port:
+            print(f"请更换端口后重试，例如: python web/server.py {port + 1}")
+        else:
+            print(f"默认端口 {port} 及后续端口均不可用")
         sys.exit(1)
 
-    print(f"服务已启动: {url}")
-    print("关闭此窗口即停止服务。")
+    selected_port = port if server is None else server.server_port
+    url = f"http://{HOST}:{selected_port}/"
+    if server is None:
+        print(f"检测到兼容的 TimePrep 服务，使用现有服务: {url}")
+        print("现有服务继续运行。")
+    else:
+        if selected_port != port:
+            print(f"端口 {port} 已被占用，已切换到空闲端口 {selected_port}")
+        print(f"服务已启动: {url}")
+        print("关闭此窗口即停止服务。")
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if server is None:
+        return
     try:
         server.serve_forever()
     except KeyboardInterrupt:
