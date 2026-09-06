@@ -335,13 +335,38 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("async function loadTrend", script)
         self.assertIn("JSON.stringify({ inputPath, rule, variables })", script)
         self.assertIn(
-            "grid-template-columns: minmax(0, 42fr) minmax(0, 58fr)", page
+            "grid-template-columns: minmax(0, 35fr) minmax(0, 65fr)", page
         )
         self.assertNotIn("载入预览", page)
         self.assertNotIn("resultWrap", page)
         self.assertNotIn("resultHead", page)
         self.assertNotIn("resultBody", page)
         self.assertNotIn("renderResult()", page)
+
+    def test_frontend_uses_hidden_only_and_invalidates_on_config_change(self):
+        page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
+        script = page[page.index("<script>") : page.index("</script>")]
+
+        self.assertIn('<div id="trendChartWrap" hidden>', page)
+        self.assertNotIn(
+            "#trendChartWrap { position: relative; display: none;", page
+        )
+        self.assertIn("$('" + "trendChartWrap" + "').hidden = false", script)
+        self.assertIn("function invalidateConfig", script)
+        self.assertIn("addEventListener('input', invalidateInput)", script)
+        self.assertIn("addEventListener('change', invalidateInput)", script)
+        self.assertIn("addEventListener('change', invalidateConfig)", script)
+        self.assertIn("addEventListener('input', invalidateConfig)", script)
+        self.assertIn("配置已修改，请重新处理", page)
+        self.assertIn("输入文件已修改，请重新处理", page)
+
+        trend_script = script[
+            script.index("function bindTrendEvents") : script.index(
+                "/* ---------- 原生文件/目录选择 ---------- */"
+            )
+        ]
+        self.assertIn("loadTrend", trend_script)
+        self.assertNotIn("invalidateConfig", trend_script)
 
     def test_frontend_has_no_global_permanent_button_disable(self):
         page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")

@@ -25,7 +25,7 @@
   header h1 { margin: 0; font-size: 17px; font-weight: 600; }
   header p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
   .workspace {
-    display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr);
+    display: grid; grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
     gap: 16px; align-items: start;
     max-width: 1600px; margin: 20px auto; padding: 0 16px 40px;
   }
@@ -83,7 +83,7 @@
     height: 420px; display: flex; align-items: center; justify-content: center;
     color: var(--muted); border: 1px dashed var(--border); border-radius: 6px;
   }
-  #trendChartWrap { position: relative; display: none; height: 420px; }
+  #trendChartWrap { position: relative; height: 420px; }
   #trendCanvas { display: block; width: 100%; height: 420px; }
   #trendTooltip {
     position: absolute; z-index: 5; display: none; pointer-events: none;
@@ -188,7 +188,7 @@
       </div>
     </div>
     <div id="trendPlaceholder">完成滤波处理后可在此比较趋势</div>
-    <div id="trendChartWrap">
+    <div id="trendChartWrap" hidden>
       <canvas id="trendCanvas"></canvas>
       <div id="trendTooltip"></div>
     </div>
@@ -316,6 +316,16 @@ async function reconnect() {
   if ($('inputPath')) $('inputPath').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); loadPreview(); }
   });
+  const invalidateInput = () => {
+    if (!RESULT) return;
+    resetResult();
+    status('输入文件已修改，请重新处理', true);
+  };
+  $('inputPath').addEventListener('input', invalidateInput);
+  $('inputPath').addEventListener('change', invalidateInput);
+  $('ruleSelect').addEventListener('change', invalidateConfig);
+  $('ruleCustom').addEventListener('input', invalidateConfig);
+  $('ruleCustom').addEventListener('change', invalidateConfig);
   bindTrendEvents();
   connectService();
 })();
@@ -335,6 +345,12 @@ function resetResult() {
   $('trendVar').disabled = true;
   $('trendPlaceholder').hidden = false;
   $('trendChartWrap').hidden = true;
+}
+
+function invalidateConfig() {
+  if (!RESULT) return;
+  resetResult();
+  status('配置已修改，请重新处理', true);
 }
 
 /* ---------- 文件信息 ---------- */
@@ -407,10 +423,13 @@ function buildTable() {
     params.style.width = '100%';
     params.placeholder = '如 order=3, cutoff=0.05';
     tdParams.appendChild(params);
+    params.addEventListener('input', invalidateConfig);
+    params.addEventListener('change', invalidateConfig);
 
     sel.onchange = () => {
       const picked = METHODS.find((m) => m.key === sel.value);
       params.value = picked ? picked.defaultParams : '';
+      invalidateConfig();
     };
 
     tr.append(tdCheck, tdName, tdMethod, tdParams);
@@ -421,11 +440,17 @@ function buildTable() {
 }
 
 function selectAll(value) {
+  const changed = ROWS.some((row) => row.check.checked !== value);
   ROWS.forEach((row) => { row.check.checked = value; });
-  updateSelection();
+  if (!changed) return;
+  if (RESULT) invalidateConfig(); else updateSelection();
 }
 
 function updateSelection() {
+  if (RESULT) {
+    invalidateConfig();
+    return;
+  }
   const count = ROWS.filter((row) => row.check.checked).length;
   status(`已选择 ${count} 个变量待处理`);
 }
