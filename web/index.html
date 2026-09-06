@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="ony6kieGuOmL52SJjnSKww">
+<head data-page-node-id="D84VIqeyEjVuRBz2V9xgci">
+<meta charset="utf-8" data-page-node-id="OoccerEkGeKVgnDlrYKUYM">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="8UbL4jtaIXVwOI7am9EOus">
+<title>工业时序数据预处理工具 MVP</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --accent: #0a5f9c;
+    --accent-soft: #e8f2fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header { background: var(--accent); color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  header p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
+  main { max-width: 1100px; margin: 20px auto; padding: 0 16px 40px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .row label { width: 82px; color: var(--muted); flex: none; }
+  input[type=text], select {
+    border: 1px solid var(--border); border-radius: 5px; padding: 6px 9px;
+    font: inherit; background: #fff; color: var(--text);
+  }
+  input.path { flex: 1; min-width: 260px; font-family: Consolas, monospace; font-size: 13px; }
+  button {
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 5px; padding: 6px 13px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: .9; color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 20px; }
+  .grid div span { color: var(--muted); display: inline-block; min-width: 68px; }
+  .varlist {
+    margin-top: 10px; max-height: 74px; overflow: auto; padding: 8px 10px;
+    background: var(--accent-soft); border-radius: 5px; font-size: 12px;
+    font-family: Consolas, monospace; word-break: break-all;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; }
+  td.name { font-family: Consolas, monospace; }
+  .tablewrap { max-height: 380px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+  #status { margin-left: 10px; color: var(--muted); }
+  #outputPath { color: var(--accent); font-family: Consolas, monospace; word-break: break-all; }
+  #log {
+    margin-top: 10px; max-height: 150px; overflow: auto; background: #fafbfc;
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    font: 12px/1.7 Consolas, monospace; white-space: pre-wrap; color: #333;
+  }
+  .modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal .box {
+    background: #fff; border-radius: 8px; width: 640px; max-width: 92vw;
+    max-height: 80vh; display: flex; flex-direction: column; padding: 16px;
+    pointer-events: auto;
+  }
+  .modal .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .modal .head h3 { margin: 0; font-size: 15px; }
+  .modal .cur { font: 12px Consolas, monospace; color: var(--muted); margin-bottom: 8px; word-break: break-all; }
+  .modal ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+  .modal li {
+    padding: 5px 8px; cursor: pointer; border-radius: 4px;
+    font-family: Consolas, monospace; font-size: 13px;
+  }
+  .modal li:hover { background: var(--accent-soft); }
+  .modal li.dir::before { content: "[目录] "; color: var(--accent); }
+  .modal .foot { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
+  .err { color: #b3261e; }
+  #dropOverlay {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    align-items: center; justify-content: center; pointer-events: none;
+    background: rgba(10,95,156,.10); border: 3px dashed var(--accent);
+    color: var(--accent); font-size: 18px; font-weight: 600;
+  }
+  #dropOverlay.on { display: flex; }
+
+  /* 防止 .modal 的 display:flex 覆盖 HTML hidden 属性，导致弹窗关不掉 */
+  .modal[hidden] { display: none; }
+  .box [hidden] { display: none; }
+</style>
+</head>
+<body data-page-node-id="E7NksKgHewYfOKgvxWsIAZ">
+<header data-page-node-id="mZ3Kc4mTsxlt1jx3VjGETJ">
+  <h1 data-page-node-id="RuJ1AiDorcNQ4XKrWZG7H6">工业时序数据预处理工具 MVP</h1>
+  <p data-page-node-id="KyDGNxd2bcCzK0GLHc6zN1">读取 CSV / Excel / TXT &rarr; 时间排序 &rarr; 重采样 &rarr; 按变量滤波 &rarr; 输出 CSV</p>
+</header>
+
+<main data-page-node-id="QAS6DEmHbeSUf4wIJmH1Mc">
+  <section class="card" data-page-node-id="TFaWeq1EJs2vFQq5372GF6">
+    <h2 data-page-node-id="8Uzy4BzKbAmciLzVn2tjhw">1. 文件</h2>
+    <div class="row" data-page-node-id="7QS4mJRRJeww8U9VRagvoa">
+      <label data-page-node-id="Y2JkI4SR6yPngaabCdjH9s">输入文件</label>
+      <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件" data-page-node-id="fV7Q3reYkeHO05ftcPWkdQ">
+      <button onclick="openPicker('file')" data-page-node-id="ri8PZdBjkyXlMZ5QSnHtt5">浏览...</button>
+    </div>
+    <div class="row" data-page-node-id="idwr6EAC56XWWKZocmnZVq">
+      <label data-page-node-id="iKjQlKYHFY07gBrQIZhKP9">输出目录</label>
+      <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录" data-page-node-id="Xog4uS6zswopGhS6HZORiS">
+      <button onclick="openPicker('dir')" data-page-node-id="XBFyZ1W5eqkBQJ8lsdR6Do">浏览...</button>
+      <button onclick="loadPreview()" data-page-node-id="VbpTnqtVZCmXv0xW6Y98Ba">载入预览</button>
+    </div>
+    <p class="hint" data-page-node-id="hXBCSNcegRwl1voxZbEE0a">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b data-page-node-id="pkTk18eVIpfiAZtVy5Nawt">直接拖放到本页任意位置</b>（会复制一份到项目 uploads 目录，原文件不动）。</p>
+  </section>
+
+  <section class="card" id="previewCard" hidden data-page-node-id="Q1wf3DuCAYnLmjAbIpspsq">
+    <h2 data-page-node-id="wS92lfwnYi3TQYGQlqZQVB">2. 数据预览</h2>
+    <div class="grid" data-page-node-id="Y7Xng7cyYkRWHhNNRL2nQi">
+      <div data-page-node-id="dyBeIhXZknhr03IO867KXQ"><span data-page-node-id="2Gf3WQYRRXcUeW4SOBRpLD">文件名</span><b id="pFile" data-page-node-id="YeCBW4i53qFCAJxh6Qg1Mv">-</b></div>
+      <div data-page-node-id="atO4HVHalhhbBiYVkNVxdc"><span data-page-node-id="JlDuQYvhIRCBFOHrr9f19C">数据行数</span><b id="pRows" data-page-node-id="PfBo83CtNQ61FK6qG7KgUh">-</b></div>
+      <div data-page-node-id="nVt548eRcGYNkfJQZUMRNQ"><span data-page-node-id="sFko4mCQzDWKxdOs8bH1y0">时间列</span><b id="pTimeCol" data-page-node-id="PBUDQus0dImNm2G9rQDVeP">-</b></div>
+      <div data-page-node-id="4PmB2LUElbCYgonZBTBsAg"><span data-page-node-id="Q94z80FfYpVF6YMSJQ9eie">时间范围</span><b id="pRange" data-page-node-id="qUBKvxM7KWXL0u2aTqY0Zh">-</b></div>
+    </div>
+    <div class="varlist" id="pVars" data-page-node-id="VBi3TItGjIeLsiv0VLBBtX"></div>
+    <div class="row" style="margin-top:12px" data-page-node-id="EfkCC788nY8tcgg2cZ2gfr">
+      <label data-page-node-id="OmOG9ZkkeOGThL9FKU3bPf">重采样</label>
+      <select id="ruleSelect" data-page-node-id="wVyyJ9X4e4By43pswXIWPm"></select>
+      <input type="text" id="ruleCustom" style="width:110px" placeholder="自定义周期" data-page-node-id="zoyIBdVc4DyVjb8eDn2Mdr">
+      <span class="hint" style="margin:0" data-page-node-id="lqWuZbdLxdMDHOr3MMhwkz">留空 = 不重采样；自定义示例 30s / 15min / 1H</span>
+    </div>
+  </section>
+
+  <section class="card" id="configCard" hidden data-page-node-id="IwQwpXA9urI1BsVN6f7PjY">
+    <h2 data-page-node-id="1yVeLOK5EhT0gQTgjPqkd2">3. 变量处理配置</h2>
+    <div class="row" data-page-node-id="9ZcsHPou1aTWg3POMJy6V2">
+      <button onclick="selectAll(true)" data-page-node-id="eJMEAKVGGztU41Ky0E8cgZ">全选</button>
+      <button onclick="selectAll(false)" data-page-node-id="7zFlAE7MZEJqQnI0vn7XBS">全不选</button>
+      <span class="hint" style="margin:0" data-page-node-id="hieWoPWL9LBhzu2BPMFFDq">勾选的变量才会滤波；未勾选变量原样输出</span>
+    </div>
+    <div class="tablewrap" data-page-node-id="U2ZLJGZhzwGlA1HHINDgz0">
+      <table data-page-node-id="cCVMvXLzcpUHOHrgMcg6DU">
+        <thead data-page-node-id="RfVFPCxxvt4hGOpGaR33jN"><tr data-page-node-id="XEvo2J0Et4BX8UtQRwykUA"><th style="width:52px" data-page-node-id="ipzp04U7f96362TDvIVkGq">处理</th><th data-page-node-id="7VMnDN7j6KyV44FZMXp92B">变量</th><th style="width:200px" data-page-node-id="pSXxZu5EifQYpy8s1S78Io">滤波方式</th><th style="width:260px" data-page-node-id="9dVvqMRQ2epb3K0rfvgQ2G">参数</th></tr></thead>
+        <tbody id="varBody" data-page-node-id="EyGsm4xqzHMltDXKHmASFi"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" data-page-node-id="RqmoQ9RHVyzVTkrww4QWYG">
+    <h2 data-page-node-id="gie1KZic1ZZ2eC5EJSbk4H">4. 执行</h2>
+    <div class="row" data-page-node-id="U2wXjgIuR20YaOmTTj9ucP">
+      <button class="primary" id="runBtn" onclick="run()" data-page-node-id="ESfcOikRvGjshphwmsSMwY">开始处理</button>
+      <span id="status" data-page-node-id="jYOCAanpSWFGDD5Ko3w5vP">请选择输入文件</span>
+    </div>
+    <div class="row" data-page-node-id="FRU8rDJDYTRUwSc9T75BSm"><label data-page-node-id="gRCwr7xduGbPmwFE8n6pPb">输出文件</label><span id="outputPath" data-page-node-id="QOV1IPWj8pPQjWPQCZTsVC">-</span></div>
+    <div class="tablewrap" id="resultWrap" hidden style="max-height:260px" data-page-node-id="xPFGWjx1FbvlxhSM7mBfSu">
+      <table data-page-node-id="pIzfX0Jrk2cnX4RHcpYdsS"><thead id="resultHead" data-page-node-id="eF16vtTZnyoiWcHOelkGFq"></thead><tbody id="resultBody" data-page-node-id="i2mz2enY6r52a8UpDpGhtE"></tbody></table>
+    </div>
+    <div id="log" data-page-node-id="sy7Hnfyrak6lwvWA9cVU4f"></div>
+  </section>
+</main>
+
+<div id="dropOverlay" data-page-node-id="pQCcZEvJwqMnBNIy8m5DD3">松开鼠标，载入数据文件</div>
+
+<div class="modal" id="modal" hidden data-page-node-id="FSeANG1es38aNtsCZeKUDu">
+  <div class="box" data-page-node-id="BnykudwRfCDX8Zv2jYzS5e">
+    <div class="head" data-page-node-id="yPEcU5gpI6kph90s52xRYc">
+      <h3 id="modalTitle" data-page-node-id="R6rd0yyo4H2bo2G1KRkk7y">选择</h3>
+      <button onclick="closePicker()" data-page-node-id="ZQO0iX5epWY3V0jdHgvqC9">关闭</button>
+    </div>
+    <div class="cur" id="modalPath" data-page-node-id="fHik3JDUzfx1NJLaBhdUUo"></div>
+    <ul id="modalList" data-page-node-id="8ZpovITb7B9boGoIJgAePE"></ul>
+    <div class="foot" data-page-node-id="CzExoDB0stVuClxgY6tFXy">
+      <button onclick="pickParent()" data-page-node-id="AXApPv9LS4K5RA7F055lOD">向上一级</button>
+      <button id="pickDirBtn" onclick="pickCurrentDir()" data-page-node-id="IwBh6xPn14k40pLDM0z435">选择当前目录</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let METHODS = [];
+let COLUMNS = [];
+let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params }
+let pickerMode = 'file';
+let pickerCurrent = '';
+
+const $ = (id) => document.getElementById(id);
+
+async function api(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+function log(text) {
+  $('log').textContent += text + '\n';
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+function status(text, isError) {
+  $('status').textContent = text;
+  $('status').className = isError ? 'err' : '';
+}
+
+/* ---------- 初始化 ---------- */
+(async function init() {
+  try {
+    const meta = await api('/api/methods');
+    METHODS = meta.methods;
+    const select = $('ruleSelect');
+    meta.presetRules.forEach((rule) => {
+      const opt = document.createElement('option');
+      opt.value = rule;
+      opt.textContent = rule === '' ? '不重采样' : rule;
+      select.appendChild(opt);
+    });
+  } catch (err) {
+    status('无法连接服务: ' + err.message, true);
+  }
+})();
+
+/* ---------- 预览 ---------- */
+async function loadPreview() {
+  const path = $('inputPath').value.trim();
+  if (!path) { status('请先选择输入文件', true); return; }
+  status('读取中...');
+  try {
+    const data = await api('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+    COLUMNS = data.columns;
+    $('pFile').textContent = data.file;
+    $('pRows').textContent = data.rows + ' 行';
+    $('pTimeCol').textContent = data.timeColumn;
+    $('pRange').textContent = data.timeRange;
+    $('pVars').textContent = data.columns.map((c) => c.name + (c.numeric ? '' : ' [非数值]')).join('  |  ');
+    $('previewCard').hidden = false;
+    $('configCard').hidden = false;
+    buildTable();
+    status(`已载入 ${data.file}，${data.columns.length} 个变量`);
+    if (data.droppedRows) log(`提示：已丢弃 ${data.droppedRows} 行时间无法解析的数据`);
+  } catch (err) {
+    status('读取失败: ' + err.message, true);
+    log('[错误] ' + err.message);
+  }
+}
+
+function buildTable() {
+  const body = $('varBody');
+  body.textContent = '';
+  ROWS = [];
+  COLUMNS.forEach((col) => {
+    const tr = document.createElement('tr');
+
+    const tdCheck = document.createElement('td');
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.onchange = updateSelection;
+    tdCheck.appendChild(check);
+
+    const tdName = document.createElement('td');
+    tdName.className = 'name';
+    tdName.textContent = col.name;
+    if (!col.numeric) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = ' 非数值';
+      tdName.appendChild(tag);
+    }
+
+    const tdMethod = document.createElement('td');
+    const sel = document.createElement('select');
+    METHODS.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.key;
+      opt.textContent = m.label;
+      sel.appendChild(opt);
+    });
+    tdMethod.appendChild(sel);
+
+    const tdParams = document.createElement('td');
+    const params = document.createElement('input');
+    params.type = 'text';
+    params.style.width = '100%';
+    params.placeholder = '如 order=3, cutoff=0.05';
+    tdParams.appendChild(params);
+
+    sel.onchange = () => {
+      const picked = METHODS.find((m) => m.key === sel.value);
+      params.value = picked ? picked.defaultParams : '';
+    };
+
+    tr.append(tdCheck, tdName, tdMethod, tdParams);
+    body.appendChild(tr);
+    ROWS.push({ name: col.name, check, method: sel, params });
+  });
+  updateSelection();
+}
+
+function selectAll(value) {
+  ROWS.forEach((row) => { row.check.checked = value; });
+  updateSelection();
+}
+
+function updateSelection() {
+  const count = ROWS.filter((row) => row.check.checked).length;
+  status(`已选择 ${count} 个变量待处理`);
+}
+
+/* ---------- 执行 ---------- */
+async function run() {
+  const inputPath = $('inputPath').value.trim();
+  const outputDir = $('outputDir').value.trim();
+  if (!inputPath) { status('请先选择输入文件', true); return; }
+  if (!outputDir) { status('请先选择输出目录', true); return; }
+
+  const rule = $('ruleSelect').value === '' ? $('ruleCustom').value.trim() : $('ruleSelect').value;
+  const variables = {};
+  ROWS.forEach((row) => {
+    variables[row.name] = {
+      enabled: row.check.checked,
+      method: row.method.value,
+      params: row.params.value,
+    };
+  });
+
+  $('runBtn').disabled = true;
+  status('处理中...');
+  try {
+    const data = await api('/api/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputPath, outputDir, rule, variables }),
+    });
+    $('outputPath').textContent = data.outputPath;
+    status(`完成：${data.rowsIn} → ${data.rowsOut} 行，滤波变量 ${data.processed.length} 个`);
+    data.messages.forEach((m) => log('  - ' + m));
+    log('输出：' + data.outputPath);
+    renderResult(data);
+  } catch (err) {
+    status('处理失败: ' + err.message, true);
+    log('[错误] ' + err.message);
+  } finally {
+    $('runBtn').disabled = false;
+  }
+}
+
+function renderResult(data) {
+  const head = $('resultHead');
+  const body = $('resultBody');
+  head.textContent = '';
+  body.textContent = '';
+  const tr = document.createElement('tr');
+  data.previewColumns.forEach((name) => {
+    const th = document.createElement('th');
+    th.textContent = name;
+    tr.appendChild(th);
+  });
+  head.appendChild(tr);
+  data.previewRows.forEach((row) => {
+    const tr = document.createElement('tr');
+    row.forEach((value) => {
+      const td = document.createElement('td');
+      td.textContent = value === null ? '' : (typeof value === 'number' ? value.toFixed(4) : value);
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  $('resultWrap').hidden = false;
+}
+
+/* ---------- 文件选择 ---------- */
+function openPicker(mode) {
+  pickerMode = mode;
+  $('modalTitle').textContent = mode === 'file' ? '选择输入文件' : '选择输出目录';
+  $('pickDirBtn').hidden = mode !== 'dir';
+  $('modal').hidden = false;
+  const start = (mode === 'file' ? $('inputPath').value : $('outputDir').value).trim();
+  listDir(start || '');
+}
+
+function closePicker() { $('modal').hidden = true; }
+
+async function listDir(path) {
+  try {
+    const data = await api('/api/list?path=' + encodeURIComponent(path));
+    pickerCurrent = data.path;
+    $('modalPath').textContent = data.path;
+    const ul = $('modalList');
+    ul.textContent = '';
+    data.entries.forEach((entry) => {
+      const li = document.createElement('li');
+      li.textContent = entry.name;
+      if (entry.type === 'dir') {
+        li.className = 'dir';
+        li.onclick = () => listDir(entry.path);
+      } else {
+        li.onclick = () => {
+          $('inputPath').value = entry.path;
+          loadPreview();
+          closePicker();
+        };
+      }
+      ul.appendChild(li);
+    });
+  } catch (err) {
+    log('[错误] ' + err.message);
+  }
+}
+
+function pickParent() {
+  const parent = pickerCurrent.replace(/[/\\][^/\\]*$/, '');
+  if (parent && parent !== pickerCurrent) listDir(parent);
+}
+
+function pickCurrentDir() {
+  $('outputDir').value = pickerCurrent;
+  closePicker();
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
+
+/* 点击弹窗半透明背景也关闭 */
+$('modal').addEventListener('click', (e) => {
+  if (e.target === $('modal')) closePicker();
+});
+
+/* ---------- 拖放文件 ---------- */
+/* 浏览器不暴露本地绝对路径，拖放只能拿到文件内容，因此上传一份副本到 uploads 目录 */
+let dragDepth = 0;
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach((type) => {
+  document.addEventListener(type, (e) => {
+    e.preventDefault();
+    if (type === 'dragenter') dragDepth += 1;
+    if (type === 'dragleave') dragDepth = Math.max(0, dragDepth - 1);
+    if (type === 'dragover') { $('dropOverlay').classList.add('on'); return; }
+    if (type === 'dragleave' && dragDepth === 0) $('dropOverlay').classList.remove('on');
+    if (type === 'drop') {
+      dragDepth = 0;
+      $('dropOverlay').classList.remove('on');
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) uploadFile(file);
+    }
+  });
+});
+
+async function uploadFile(file) {
+  status('上传中: ' + file.name);
+  try {
+    const data = await api('/api/upload?name=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      body: file,
+    });
+    $('inputPath').value = data.path;
+    if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[/\\][^/\\]+$/, '');
+    log(`拖放载入：${data.name}（${(data.size / 1024).toFixed(1)} KB） -> ${data.path}`);
+    await loadPreview();
+  } catch (err) {
+    status('上传失败: ' + err.message, true);
+    log('[错误] ' + err.message);
+  }
+}
+</script>
+</body>
+</html>
