@@ -20,8 +20,12 @@ def _initial_dir(value: str) -> str:
 
 def _pick(mode: str, initial_path: str) -> dict:
     root = tk.Tk()
+    root.attributes("-topmost", True)
     root.withdraw()
+    root.update()
     try:
+        root.lift()
+        root.focus_force()
         initial_dir = _initial_dir(initial_path)
         if mode == "file":
             selected = filedialog.askopenfilename(
@@ -38,6 +42,7 @@ def _pick(mode: str, initial_path: str) -> dict:
                 mustexist=True,
             )
     finally:
+        root.attributes("-topmost", False)
         root.destroy()
 
     return {"cancelled": True} if not selected else {"path": selected}
