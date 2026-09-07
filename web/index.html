@@ -423,7 +423,7 @@ function buildTable() {
     const params = document.createElement('input');
     params.type = 'text';
     params.style.width = '100%';
-    params.placeholder = '如 order=3, cutoff=0.05';
+    params.placeholder = '如 window=5, tau=10min, alpha=0.2';
     tdParams.appendChild(params);
     params.addEventListener('input', invalidateConfig);
     params.addEventListener('change', invalidateConfig);

@@ -5,7 +5,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from core.filter import BUTTERWORTH, EWM, METHOD_LABELS, MOVING_AVERAGE, SAVGOL, filter_column
+from core.filter import (
+    DEFAULT_PARAMS,
+    EWM,
+    FIRST_ORDER_LOWPASS,
+    METHOD_LABELS,
+    METHODS,
+    MOVING_AVERAGE,
+    NONE,
+    filter_column,
+)
 from core.loader import load_file, to_datetime
 from core.processor import ProcessConfig, VariableConfig, process_data, process_file
 from core.resample import numeric_like_frame, resample
@@ -201,17 +210,102 @@ class CoreProcessingTests(unittest.TestCase):
 
         moving_average = filter_column(series, MOVING_AVERAGE, {"window": 3})
         ema = filter_column(series, EWM, {"alpha": 0.5})
-        butterworth = filter_column(series, BUTTERWORTH, {"order": 2, "cutoff": 0.2})
-        savgol = filter_column(series, SAVGOL, {"window": 5, "polyorder": 2})
+        lowpass = filter_column(series, FIRST_ORDER_LOWPASS, {"tau": "5s"})
 
-        for filtered in (moving_average, ema, butterworth, savgol):
+        for filtered in (moving_average, ema, lowpass):
             self.assertEqual(list(filtered.index), list(series.index))
             self.assertEqual(len(filtered), len(series))
             self.assertTrue(np.isfinite(filtered.to_numpy()).all())
         self.assertFalse(np.allclose(moving_average.to_numpy(), series.to_numpy()))
         self.assertFalse(np.allclose(ema.to_numpy(), series.to_numpy()))
-        self.assertFalse(np.allclose(butterworth.to_numpy(), series.to_numpy()))
-        self.assertFalse(np.allclose(savgol.to_numpy(), series.to_numpy()))
+        self.assertFalse(np.allclose(lowpass.to_numpy(), series.to_numpy()))
+
+    def test_filter_methods_are_fixed_and_ordered(self):
+        self.assertEqual(METHODS, (NONE, MOVING_AVERAGE, FIRST_ORDER_LOWPASS, EWM))
+        self.assertEqual(
+            [METHOD_LABELS[key] for key in METHODS],
+            ["无滤波", "移动平均", "一阶低通滤波", "指数移动平均 (EMA)"],
+        )
+        self.assertEqual(DEFAULT_PARAMS[FIRST_ORDER_LOWPASS], {"tau": "10min"})
+
+    def test_first_order_lowpass_uses_fixed_time_step(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="min")
+        series = pd.Series([0.0, 10.0, 10.0, 10.0], index=index)
+        alpha = 1 - np.exp(-60 / 120)
+        expected = [0.0]
+        for _ in range(3):
+            expected.append(expected[-1] + alpha * (10.0 - expected[-1]))
+
+        result = filter_column(series, FIRST_ORDER_LOWPASS, {"tau": "2min"})
+
+        np.testing.assert_allclose(result.to_numpy(), expected)
+
+    def test_first_order_lowpass_uses_actual_time_deltas(self):
+        index = pd.to_datetime(
+            [
+                "2024-01-01 00:00:00",
+                "2024-01-01 00:01:00",
+                "2024-01-01 00:03:00",
+                "2024-01-01 00:06:00",
+            ]
+        )
+        series = pd.Series([0.0, 10.0, 10.0, 10.0], index=index)
+        expected = [0.0]
+        for delta_seconds in (60, 120, 180):
+            alpha = 1 - np.exp(-delta_seconds / 120)
+            expected.append(expected[-1] + alpha * (10.0 - expected[-1]))
+
+        result = filter_column(series, FIRST_ORDER_LOWPASS, {"tau": "2min"})
+
+        np.testing.assert_allclose(result.to_numpy(), expected)
+
+    def test_first_order_lowpass_accepts_time_units(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="min")
+        series = pd.Series([0.0, 1.0, 1.0, 1.0], index=index)
+
+        for tau in ("30s", "5min", "1h"):
+            result = filter_column(series, FIRST_ORDER_LOWPASS, {"tau": tau})
+            self.assertEqual(len(result), len(series))
+
+    def test_first_order_lowpass_rejects_invalid_tau(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="min")
+        series = pd.Series([0.0, 1.0, 1.0, 1.0], index=index)
+
+        for tau in (0, -1, "not-a-duration"):
+            with self.assertRaisesRegex(ValueError, "tau"):
+                filter_column(series, FIRST_ORDER_LOWPASS, {"tau": tau})
+
+    def test_first_order_lowpass_requires_datetime_index(self):
+        series = pd.Series([0.0, 1.0, 1.0, 1.0])
+
+        with self.assertRaisesRegex(ValueError, "一阶低通滤波需要时间索引"):
+            filter_column(series, FIRST_ORDER_LOWPASS, {"tau": "1min"})
+
+    def test_first_order_lowpass_restores_original_nan(self):
+        index = pd.date_range("2024-01-01", periods=5, freq="min")
+        series = pd.Series([0.0, np.nan, 10.0, 10.0, 10.0], index=index)
+        alpha = 1 - np.exp(-60 / 60)
+        interpolated = [0.0, 5.0, 10.0, 10.0, 10.0]
+        expected = [interpolated[0]]
+        for value in interpolated[1:]:
+            expected.append(expected[-1] + alpha * (value - expected[-1]))
+
+        result = filter_column(series, FIRST_ORDER_LOWPASS, {"tau": "1min"})
+
+        self.assertTrue(pd.isna(result.iloc[1]))
+        np.testing.assert_allclose(
+            result.dropna().to_numpy(), [expected[0], expected[2], expected[3], expected[4]]
+        )
+
+    def test_ema_and_moving_average_results_remain_unchanged(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="min")
+        series = pd.Series([1.0, 3.0, 2.0, 5.0], index=index)
+
+        moving_average = filter_column(series, MOVING_AVERAGE, {"window": 3})
+        ema = filter_column(series, EWM, {"alpha": 0.5})
+
+        np.testing.assert_allclose(moving_average.to_numpy(), [1.0, 2.0, 2.0, 10 / 3])
+        np.testing.assert_allclose(ema.to_numpy(), [1.0, 2.0, 2.0, 3.5])
 
     def test_process_file_filters_selected_columns_and_exports_raw_filtered(self):
         with tempfile.TemporaryDirectory() as directory:

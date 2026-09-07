@@ -67,6 +67,15 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(result["apiVersion"], web_server.WEB_API_VERSION)
+        self.assertEqual(
+            [(item["key"], item["label"], item["defaultParams"]) for item in result["methods"]],
+            [
+                ("none", "无滤波", ""),
+                ("moving_average", "移动平均", "window=5"),
+                ("first_order_lowpass", "一阶低通滤波", "tau=10min"),
+                ("ewm", "指数移动平均 (EMA)", "alpha=0.2"),
+            ],
+        )
 
     def test_pick_file_returns_absolute_path(self):
         selected = str(Path.home() / "data.csv")

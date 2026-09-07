@@ -1,40 +1,35 @@
 """滤波：按变量独立选择滤波方式与参数。
 
 对外主接口 filter_column(series, method, params)。
-短序列、参数越界等情况会降级为原始数据并发出 UserWarning，不抛异常中断批处理。
+短序列仍按现有规则返回原始数据；参数错误会抛出 ValueError。
 """
 
 from __future__ import annotations
 
 import json
-import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, filtfilt, savgol_filter
 
 NONE = "none"
 MOVING_AVERAGE = "moving_average"
+FIRST_ORDER_LOWPASS = "first_order_lowpass"
 EWM = "ewm"
-BUTTERWORTH = "butterworth"
-SAVGOL = "savgol"
 
-METHODS = (NONE, MOVING_AVERAGE, EWM, BUTTERWORTH, SAVGOL)
+METHODS = (NONE, MOVING_AVERAGE, FIRST_ORDER_LOWPASS, EWM)
 
 METHOD_LABELS = {
     NONE: "无滤波",
     MOVING_AVERAGE: "移动平均",
+    FIRST_ORDER_LOWPASS: "一阶低通滤波",
     EWM: "指数移动平均 (EMA)",
-    BUTTERWORTH: "Butterworth 低通",
-    SAVGOL: "Savitzky-Golay",
 }
 
 DEFAULT_PARAMS = {
     NONE: {},
     MOVING_AVERAGE: {"window": 5},
+    FIRST_ORDER_LOWPASS: {"tau": "10min"},
     EWM: {"alpha": 0.2},
-    BUTTERWORTH: {"order": 3, "cutoff": 0.05},
-    SAVGOL: {"window": 11, "polyorder": 2},
 }
 
 # 少于该点数时不进行滤波，直接返回原始数据
@@ -48,7 +43,7 @@ def filter_column(
 ) -> pd.Series:
     """对单个变量做滤波，返回与输入同长度、同索引的 Series。
 
-    缺失值处理：滤波前线性插值（filtfilt 无法处理 NaN），
+    缺失值处理：滤波前线性插值，
     滤波后原始缺失位置重新置为 NaN，不伪造数据点。
     """
     method = (method or NONE).lower()
@@ -59,25 +54,29 @@ def filter_column(
     values = pd.to_numeric(series, errors="coerce").astype(float)
     values.name = series.name
 
+    if method == FIRST_ORDER_LOWPASS:
+        if not isinstance(values.index, pd.DatetimeIndex):
+            raise ValueError("一阶低通滤波需要时间索引")
+        _parse_tau(merged["tau"])
+
     if method == NONE or values.notna().sum() < _MIN_POINTS:
         return values
 
     filled = values.interpolate(limit_direction="both") if values.isna().any() else values
-    result = _apply(filled.to_numpy(dtype=float), method, merged)
+    result = _apply(filled.to_numpy(dtype=float), method, merged, values.index)
     filtered = pd.Series(result, index=values.index, name=series.name)
     filtered[values.isna()] = np.nan
     return filtered
 
 
-def _apply(x: np.ndarray, method: str, params: dict) -> np.ndarray:
-    n = len(x)
+def _apply(x: np.ndarray, method: str, params: dict, index: pd.Index) -> np.ndarray:
     if method == MOVING_AVERAGE:
         return _moving_average(x, params)
+    if method == FIRST_ORDER_LOWPASS:
+        return _first_order_lowpass(x, params, index)
     if method == EWM:
         return _ewm(x, params)
-    if method == BUTTERWORTH:
-        return _butterworth(x, params, n)
-    return _savgol(x, params, n)
+    raise ValueError(f"未知滤波方式: {method}")
 
 
 def _moving_average(x: np.ndarray, params: dict) -> np.ndarray:
@@ -95,46 +94,30 @@ def _ewm(x: np.ndarray, params: dict) -> np.ndarray:
     return pd.Series(x).ewm(alpha=alpha, adjust=False).mean().to_numpy()
 
 
-def _butterworth(x: np.ndarray, params: dict, n: int) -> np.ndarray:
-    order = int(params["order"])
-    cutoff = float(params["cutoff"])
-    if order < 1:
-        raise ValueError("Butterworth order 必须 >= 1")
-    if not 0 < cutoff < 1:
-        raise ValueError("Butterworth cutoff 为归一化频率，必须位于 (0, 1) 之间")
-
-    b, a = butter(order, cutoff, btype="low")
-    padlen = 3 * max(len(a), len(b))
-    if n <= padlen:
-        warnings.warn(
-            f"序列过短（{n} 点，需要 > {padlen} 点），Butterworth 已跳过，返回原始数据",
-            stacklevel=2,
-        )
-        return x
-    # filtfilt 前后向滤波，抵消相位偏移
-    return filtfilt(b, a, x, padlen=padlen)
+def _first_order_lowpass(x: np.ndarray, params: dict, index: pd.Index) -> np.ndarray:
+    tau = _parse_tau(params["tau"])
+    result = np.empty(len(x), dtype=float)
+    result[0] = x[0]
+    tau_seconds = tau.total_seconds()
+    for position in range(1, len(x)):
+        delta_seconds = (index[position] - index[position - 1]).total_seconds()
+        alpha = -np.expm1(-delta_seconds / tau_seconds)
+        result[position] = result[position - 1] + alpha * (x[position] - result[position - 1])
+    return result
 
 
-def _savgol(x: np.ndarray, params: dict, n: int) -> np.ndarray:
-    window = int(params["window"])
-    polyorder = int(params["polyorder"])
-    if window % 2 == 0:
-        window += 1
-    if window > n:
-        window = n if n % 2 == 1 else n - 1
-    if polyorder >= window:
-        polyorder = window - 1
-    if window < 3 or polyorder < 1:
-        warnings.warn(
-            f"序列过短（{n} 点），Savitzky-Golay 已跳过，返回原始数据",
-            stacklevel=2,
-        )
-        return x
-    return savgol_filter(x, window, polyorder)
+def _parse_tau(value) -> pd.Timedelta:
+    try:
+        tau = pd.to_timedelta(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("一阶低通 tau 必须是大于 0 的时间间隔") from exc
+    if not isinstance(tau, pd.Timedelta) or pd.isna(tau) or tau <= pd.Timedelta(0):
+        raise ValueError("一阶低通 tau 必须是大于 0 的时间间隔")
+    return tau
 
 
 def parse_params(text: str | None) -> dict:
-    """解析参数文本，支持 'window=10, order=3' 与 JSON 两种写法。"""
+    """解析参数文本，支持 'window=10, tau=5min' 与 JSON 两种写法。"""
     if text is None:
         return {}
     raw = str(text).strip()
