@@ -175,6 +175,8 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["processed"], ["A"])
         self.assertEqual(result["exportable"], True)
+        self.assertEqual(result["timeStart"], "2026-09-01 10:00:00")
+        self.assertEqual(result["timeEnd"], "2026-09-01 10:03:00")
         self.assertIsNone(result.get("outputPath"))
         self.assertNotIn("previewColumns", result)
         self.assertNotIn("previewRows", result)
@@ -221,6 +223,11 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(result["raw"], [1.0, 2.0, 3.0, 4.0])
         self.assertEqual(len(result["filtered"]), 4)
+        self.assertEqual(result["rangeStart"], "2026-09-01 10:00:00")
+        self.assertEqual(result["rangeEnd"], "2026-09-01 10:03:00")
+        self.assertEqual(result["rawRows"], 4)
+        self.assertEqual(result["rows"], 4)
+        self.assertEqual(result["maxPoints"], web_server.TREND_DEFAULT_MAX_POINTS)
 
     def test_api_trend_downsamples_long_series_within_display_cap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -230,14 +237,95 @@ class WebApiTests(unittest.TestCase):
             pd.DataFrame({"Time": index, "A": range(50_000)}).to_csv(source, index=False)
             self._process_source(source)
 
-            status, result = self.request("GET", "/api/trend?variable=A")
+            status, result = self.request("GET", "/api/trend?variable=A&maxPoints=2000")
 
         self.assertEqual(status, 200, result)
-        self.assertLessEqual(len(result["time"]), web_server.TREND_MAX_POINTS)
+        self.assertLessEqual(len(result["time"]), 2000)
+        self.assertEqual(result["rawRows"], 50_000)
+        self.assertEqual(result["rows"], len(result["time"]))
         self.assertEqual(len(result["raw"]), len(result["time"]))
         self.assertEqual(len(result["filtered"]), len(result["time"]))
         self.assertEqual(str(result["time"][0]), str(index[0]))
         self.assertEqual(str(result["time"][-1]), str(index[-1]))
+
+    def test_api_trend_crops_before_downsampling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            index = pd.date_range("2026-09-01 10:00:00", periods=50_000, freq="s")
+            pd.DataFrame({"Time": index, "A": range(50_000)}).to_csv(source, index=False)
+            self._process_source(source)
+            start = index[10_000]
+            end = index[10_499]
+
+            status, result = self.request(
+                "GET",
+                "/api/trend?variable=A&start="
+                + start.isoformat()
+                + "&end="
+                + end.isoformat()
+                + "&maxPoints=2000",
+            )
+
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result["rawRows"], 500)
+        self.assertEqual(result["rows"], 500)
+        self.assertEqual(str(result["time"][0]), str(start))
+        self.assertEqual(str(result["time"][-1]), str(end))
+
+    def test_api_trend_rejects_invalid_ranges_and_reports_empty_ranges(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            index = pd.date_range("2026-09-01 10:00:00", periods=4, freq="min")
+            pd.DataFrame({"Time": index, "A": [1, 2, 3, 4]}).to_csv(source, index=False)
+            self._process_source(source)
+
+            status, result = self.request(
+                "GET",
+                "/api/trend?variable=A&start=2026-09-01T10:03:00"
+                "&end=2026-09-01T10:02:00",
+            )
+            self.assertEqual(status, 400)
+            self.assertIn("开始时间不能晚于结束时间", result["error"])
+
+            status, result = self.request(
+                "GET",
+                "/api/trend?variable=A&start=2026-09-02T00:00:00"
+                "&end=2026-09-02T01:00:00",
+            )
+
+        self.assertEqual(status, 400)
+        self.assertIn("所选时间范围内没有数据", result["error"])
+
+    def test_api_trend_clamps_max_points_to_safe_bounds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            index = pd.date_range("2026-09-01 10:00:00", periods=150, freq="s")
+            pd.DataFrame({"Time": index, "A": range(150)}).to_csv(source, index=False)
+            self._process_source(source)
+
+            low_status, low = self.request("GET", "/api/trend?variable=A&maxPoints=1")
+            high_status, high = self.request("GET", "/api/trend?variable=A&maxPoints=100001")
+
+        self.assertEqual(low_status, 200, low)
+        self.assertEqual(low["maxPoints"], web_server.TREND_MIN_POINTS)
+        self.assertLessEqual(low["rows"], web_server.TREND_MIN_POINTS)
+        self.assertEqual(high_status, 200, high)
+        self.assertEqual(high["maxPoints"], web_server.TREND_MAX_POINTS)
+        self.assertEqual(high["rows"], 150)
+
+    def test_api_trend_does_not_change_cached_process_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.csv"
+            index = pd.date_range("2026-09-01 10:00:00", periods=150, freq="s")
+            pd.DataFrame({"Time": index, "A": range(150)}).to_csv(source, index=False)
+            self._process_source(source)
+            self.request("GET", "/api/trend?variable=A&maxPoints=100")
+
+        self.assertEqual(len(self.httpd.pending_result["frame"]), 150)
 
     def test_api_export_and_trend_reject_without_result(self):
         status, result = self.request(
@@ -362,10 +450,24 @@ class WebApiTests(unittest.TestCase):
 
         self.assertIn("趋势对比", page)
         self.assertIn('id="trendVar"', page)
+        self.assertIn('id="trendStart"', page)
+        self.assertIn('id="trendEnd"', page)
+        self.assertIn('id="trendMaxPoints"', page)
+        self.assertIn('id="trendZoomIn"', page)
+        self.assertIn('id="trendZoomOut"', page)
+        self.assertIn('id="trendResetRange"', page)
+        self.assertIn('type="datetime-local" step="1"', page)
+        self.assertIn('min="100" max="100000" value="2000"', page)
         self.assertIn('id="trendCanvas"', page)
         self.assertIn('id="exportBtn"', page)
         self.assertIn("async function exportResult", script)
         self.assertIn("async function loadTrend", script)
+        self.assertIn("maxPoints=", script)
+        self.assertIn("setTrendFullRange(data.timeStart, data.timeEnd)", script)
+        self.assertIn("changeTrendRange(0.5)", script)
+        self.assertIn("changeTrendRange(2)", script)
+        self.assertIn("resetTrendRange", script)
+        self.assertIn("formatTrendAxisTime", script)
         self.assertIn("JSON.stringify({ inputPath, rule, variables })", script)
         self.assertIn("processable", script)
         self.assertNotIn(".numeric", script)
@@ -467,6 +569,15 @@ class WebApiTests(unittest.TestCase):
                 ("tableRows", 1),
                 ("rowNames", ["TIC101"]),
                 ("status", "已载入 industrial.csv，共 2 个变量，其中 1 个可处理变量"),
+            ],
+            "trend_range": [
+                ("zoomInDuration", 0.5),
+                ("zoomOutIsFull", True),
+                ("leftBoundary.startIsFull", True),
+                ("leftBoundary.durationDays", 2),
+                ("fullRange", ["2026-09-01T00:00:00", "2026-09-05T00:00:00"]),
+                ("crossDayLabel", "09-02 12:00"),
+                ("sameDayLabel", "12:00"),
             ],
         }.items():
             completed = subprocess.run(

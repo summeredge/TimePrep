@@ -19,13 +19,15 @@ function makeElement(tag, id) {
     dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach(fn => fn(ev)); return true; },
   };
   if (id) { elements[id] = el; }
-  if (id === "runBtn" || id === "reconnectBtn" || id === "exportBtn") { buttons[id] = el; }
+  if (["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) { buttons[id] = el; }
   return el;
 }
 const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","status","log","previewCard","configCard",
              "pFile","pRows","pRange","varBody","outputPath","runBtn","reconnectBtn",
-             "exportBtn","trendVar","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
-ids.forEach(id => makeElement((id === "runBtn" || id === "reconnectBtn" || id === "exportBtn") ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : "div")), id));
+             "exportBtn","trendVar","trendStart","trendEnd","trendMaxPoints","trendZoomIn",
+             "trendZoomOut","trendResetRange","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
+ids.forEach(id => makeElement((["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : "div")), id));
+elements.trendMaxPoints.value = "2000";
 const documentShim = {
   getElementById(id) { return elements[id] || null; },
   createElement(tag) { return makeElement(tag); },
@@ -48,7 +50,7 @@ function execute(stub) {
     ${pageScript.replace(/\bapiReady\b/g, "__apiReady").replace(/\bversionMismatch\b/g, "__versionMismatch")}
     REF.apiReady = () => __apiReady;
     REF.versionMismatch = () => __versionMismatch;
-    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService, loadPreview, buildTable };
+    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService, loadPreview, buildTable, calculateTrendRange, setTrendFullRange, formatTrendAxisTime };
   `);
   const ctx = fn(global.fetch);
   Object.defineProperty(ctx, "apiReady", { get() { return ctx.ref.apiReady(); }, configurable: true });
@@ -122,6 +124,30 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       result.tableRows = elements.varBody.children.length;
       result.rowNames = elements.varBody.children.map((row) => row.children[1].textContent);
       result.status = elements.status.textContent;
+    } else if (scenario === "trend_range") {
+      const exec = execute((url) => url === "/api/health" ? HEALTH_OK : METHODS_OK);
+      const fullStart = Date.parse("2026-09-01T00:00:00");
+      const fullEnd = Date.parse("2026-09-05T00:00:00");
+      const zoomIn = exec.calculateTrendRange(
+        fullStart, fullEnd, fullStart, fullEnd, 0.5,
+      );
+      const zoomOut = exec.calculateTrendRange(
+        zoomIn.start, zoomIn.end, fullStart, fullEnd, 2,
+      );
+      const leftBoundary = exec.calculateTrendRange(
+        fullStart, fullStart + 24 * 60 * 60 * 1000, fullStart, fullEnd, 2,
+      );
+      exec.setTrendFullRange("2026-09-01 00:00:00", "2026-09-05 00:00:00");
+      result.zoomInDuration = (zoomIn.end - zoomIn.start) / (fullEnd - fullStart);
+      result.zoomInCenter = (zoomIn.start + zoomIn.end) / 2;
+      result.zoomOutIsFull = zoomOut.start === fullStart && zoomOut.end === fullEnd;
+      result.leftBoundary = {
+        startIsFull: leftBoundary.start === fullStart,
+        durationDays: (leftBoundary.end - leftBoundary.start) / (24 * 60 * 60 * 1000),
+      };
+      result.fullRange = [elements.trendStart.value, elements.trendEnd.value];
+      result.crossDayLabel = exec.formatTrendAxisTime(Date.parse("2026-09-02T12:00:00"), true);
+      result.sameDayLabel = exec.formatTrendAxisTime(Date.parse("2026-09-02T12:00:00"), false);
     }
   } catch (err) { result.error = String(err && err.stack || err); }
   console.log(JSON.stringify(result));

@@ -34,7 +34,9 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 WEB_API_VERSION = 2
 UPLOAD_DIR = ROOT / "uploads"
-TREND_MAX_POINTS = 2000
+TREND_DEFAULT_MAX_POINTS = 2000
+TREND_MIN_POINTS = 100
+TREND_MAX_POINTS = 100000
 
 
 class ThreadingHTTPServer(_ThreadingHTTPServer):
@@ -81,9 +83,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, status=500)
             return
         if path == "/api/trend":
-            variable = parse_qs(route.query).get("variable", [""])[0].strip()
+            query = parse_qs(route.query, keep_blank_values=True)
+            variable = query.get("variable", [""])[0].strip()
             try:
-                self._json(_trend(self.server, variable))
+                self._json(
+                    _trend(
+                        self.server,
+                        variable,
+                        query.get("start", [""])[0],
+                        query.get("end", [""])[0],
+                        query.get("maxPoints", [""])[0],
+                    )
+                )
             except Exception as exc:  # noqa: BLE001 - 统一转成接口错误
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, status=400)
             return
@@ -253,12 +264,15 @@ def _process(payload: dict) -> dict:
 
 
 def _process_response(result) -> dict:
+    index = result.frame.index
     return {
         "rowsIn": result.rows_in,
         "rowsOut": result.rows_out,
         "processed": result.processed,
         "messages": result.messages,
         "exportable": True,
+        "timeStart": _jsonable(index[0]) if len(index) else None,
+        "timeEnd": _jsonable(index[-1]) if len(index) else None,
     }
 
 
@@ -275,7 +289,13 @@ def _export(server, payload: dict) -> dict:
     return {"outputPath": str(output_path)}
 
 
-def _trend(server, variable: str) -> dict:
+def _trend(
+    server,
+    variable: str,
+    start: str = "",
+    end: str = "",
+    max_points: str | int | None = None,
+) -> dict:
     if not variable:
         raise ValueError("请选择趋势变量")
     pending = _current_pending_result(server)
@@ -286,11 +306,24 @@ def _trend(server, variable: str) -> dict:
     filtered_name = f"{variable}{processor.FILTERED_SUFFIX}"
     if raw_name not in frame.columns or filtered_name not in frame.columns:
         raise ValueError("该变量没有可用的处理结果")
+
+    full_start = pd.Timestamp(frame.index.min())
+    full_end = pd.Timestamp(frame.index.max())
+    start = _parse_trend_time(start, "开始") if str(start).strip() else full_start
+    end = _parse_trend_time(end, "结束") if str(end).strip() else full_end
+    if start > end:
+        raise ValueError("开始时间不能晚于结束时间")
+    frame = frame.loc[start:end]
+    if frame.empty:
+        raise ValueError("所选时间范围内没有数据")
+
+    max_points = _normalize_max_points(max_points)
     index = frame.index
     raw = pd.to_numeric(frame[raw_name], errors="coerce").to_numpy()
     filtered = pd.to_numeric(frame[filtered_name], errors="coerce").to_numpy()
-    if len(index) > TREND_MAX_POINTS:
-        per_block = max(1, (TREND_MAX_POINTS - 2) // 2)
+    raw_rows = len(index)
+    if raw_rows > max_points:
+        per_block = max(1, (max_points - 2) // 2)
         step = int(math.ceil(len(index) / per_block))
         # 每块在 raw/filtered 合并后保留最大、最小样本并补首尾，尽量保留峰谷
         step_indices = [0, len(index) - 1]
@@ -313,7 +346,32 @@ def _trend(server, variable: str) -> dict:
         "time": [_jsonable(value) for value in index],
         "raw": [_jsonable(value) for value in raw],
         "filtered": [_jsonable(value) for value in filtered],
+        "rangeStart": _jsonable(index.min()),
+        "rangeEnd": _jsonable(index.max()),
+        "rawRows": raw_rows,
+        "rows": len(index),
+        "maxPoints": max_points,
     }
+
+
+def _parse_trend_time(value: str, label: str) -> pd.Timestamp:
+    try:
+        parsed = pd.to_datetime(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label}时间格式无效: {value}") from exc
+    if pd.isna(parsed):
+        raise ValueError(f"{label}时间格式无效: {value}")
+    return pd.Timestamp(parsed)
+
+
+def _normalize_max_points(value: str | int | None) -> int:
+    if value is None or str(value).strip() == "":
+        return TREND_DEFAULT_MAX_POINTS
+    try:
+        requested = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("maxPoints 必须是整数") from exc
+    return min(TREND_MAX_POINTS, max(TREND_MIN_POINTS, requested))
 
 
 def _current_pending_result(server):

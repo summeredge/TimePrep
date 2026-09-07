@@ -38,7 +38,7 @@
   .left h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
   .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   .row label { width: 82px; color: var(--muted); flex: none; }
-  input[type=text], select {
+  input[type=text], input[type=number], input[type=datetime-local], select {
     border: 1px solid var(--border); border-radius: 5px; padding: 6px 9px;
     font: inherit; background: #fff; color: var(--text);
   }
@@ -72,6 +72,8 @@
   .trend h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
   .trendbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .trendbar label { color: var(--muted); }
+  .trendbar input[type=datetime-local] { width: 188px; }
+  .trendbar input[type=number] { width: 90px; }
   .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
   .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
   #trendPlaceholder {
@@ -177,6 +179,15 @@
     <div class="trendbar">
       <label>变量</label>
       <select id="trendVar" disabled><option value="">请先处理数据</option></select>
+      <label for="trendStart">开始</label>
+      <input id="trendStart" type="datetime-local" step="1">
+      <label for="trendEnd">结束</label>
+      <input id="trendEnd" type="datetime-local" step="1">
+      <label for="trendMaxPoints">最大点数</label>
+      <input id="trendMaxPoints" type="number" min="100" max="100000" value="2000">
+      <button id="trendZoomIn" type="button">放大</button>
+      <button id="trendZoomOut" type="button">缩小</button>
+      <button id="trendResetRange" type="button">全范围</button>
       <div class="legend">
         <span><i style="background:var(--raw)"></i>原始趋势</span>
         <span><i style="background:var(--filtered)"></i>滤波后趋势</span>
@@ -203,6 +214,10 @@ let RESULT = null;
 let PROCESSED = [];
 let TREND = null;
 let TREND_POINTS = [];
+let TREND_FULL_START = '';
+let TREND_FULL_END = '';
+let TREND_REQUEST = 0;
+const TREND_DEFAULT_MAX_POINTS = 2000;
 const $ = (id) => document.getElementById(id);
 
 async function api(url, options) {
@@ -327,10 +342,13 @@ async function reconnect() {
 
 /* ---------- 处理结果失效管理 ---------- */
 function resetResult() {
+  TREND_REQUEST += 1;
   RESULT = null;
   PROCESSED = [];
   TREND = null;
   TREND_POINTS = [];
+  TREND_FULL_START = '';
+  TREND_FULL_END = '';
   $('outputPath').textContent = '尚未导出';
   $('trendVar').textContent = '';
   const opt = document.createElement('option');
@@ -338,6 +356,8 @@ function resetResult() {
   opt.textContent = '请先处理数据';
   $('trendVar').appendChild(opt);
   $('trendVar').disabled = true;
+  $('trendStart').value = '';
+  $('trendEnd').value = '';
   $('trendPlaceholder').hidden = false;
   $('trendChartWrap').hidden = true;
 }
@@ -469,6 +489,7 @@ async function run() {
     });
     RESULT = data;
     PROCESSED = data.processed || [];
+    setTrendFullRange(data.timeStart, data.timeEnd);
     $('outputPath').textContent = '尚未导出';
     data.messages.forEach((m) => log('  - ' + m));
     showTrendOptions(PROCESSED);
@@ -536,19 +557,117 @@ function showTrendEmpty() {
   $('trendChartWrap').hidden = true;
 }
 
+function toTrendInput(value) {
+  return value ? String(value).trim().replace(' ', 'T') : '';
+}
+
+function setTrendFullRange(start, end) {
+  TREND_FULL_START = toTrendInput(start);
+  TREND_FULL_END = toTrendInput(end);
+  $('trendStart').value = TREND_FULL_START;
+  $('trendEnd').value = TREND_FULL_END;
+}
+
+function normalizeTrendMaxPoints() {
+  const input = $('trendMaxPoints');
+  const requested = Number.parseInt(input.value, 10);
+  const value = Number.isFinite(requested)
+    ? Math.min(100000, Math.max(100, requested))
+    : TREND_DEFAULT_MAX_POINTS;
+  input.value = String(value);
+  return value;
+}
+
+function trendUrl(variable) {
+  const params = [
+    'variable=' + encodeURIComponent(variable),
+    'start=' + encodeURIComponent($('trendStart').value),
+    'end=' + encodeURIComponent($('trendEnd').value),
+    'maxPoints=' + normalizeTrendMaxPoints(),
+  ];
+  return '/api/trend?' + params.join('&');
+}
+
 async function loadTrend(variable) {
   if (!RESULT) { showTrendEmpty(); return; }
   if (!variable) { status('请先完成数据处理', true); return; }
+  const request = ++TREND_REQUEST;
   try {
-    const data = await api('/api/trend?variable=' + encodeURIComponent(variable));
+    const data = await api(trendUrl(variable));
+    if (request !== TREND_REQUEST || !RESULT) return;
     TREND = data;
     $('trendVar').value = variable;
     $('trendPlaceholder').hidden = true;
     $('trendChartWrap').hidden = false;
     drawTrend(data);
   } catch (err) {
+    if (request !== TREND_REQUEST) return;
+    TREND = null;
+    TREND_POINTS = [];
+    showTrendEmpty();
     status('趋势加载失败: ' + err.message, true);
   }
+}
+
+function trendTimeKey(timestamp) {
+  const date = new Date(timestamp);
+  return date.getFullYear() + '-' + date.getMonth() + '-' + date.getDate();
+}
+
+function formatTrendAxisTime(timestamp, withDate) {
+  const date = new Date(timestamp);
+  const pad = (value) => String(value).padStart(2, '0');
+  const time = pad(date.getHours()) + ':' + pad(date.getMinutes());
+  return withDate ? pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + time : time;
+}
+
+function formatTrendInput(timestamp) {
+  const date = new Date(timestamp);
+  const pad = (value) => String(value).padStart(2, '0');
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+    + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+}
+
+function calculateTrendRange(start, end, fullStart, fullEnd, factor) {
+  if (![fullStart, fullEnd, start, end, factor].every(Number.isFinite) || end < start) return null;
+  const fullDuration = fullEnd - fullStart;
+  const duration = end - start;
+  if (duration <= 0 || fullDuration <= 0 || factor <= 0) return null;
+  const center = (start + end) / 2;
+  const nextDuration = Math.min(fullDuration, duration * factor);
+  let nextStart = center - nextDuration / 2;
+  let nextEnd = center + nextDuration / 2;
+  if (nextStart < fullStart) {
+    nextStart = fullStart;
+    nextEnd = Math.min(fullEnd, nextStart + nextDuration);
+  }
+  if (nextEnd > fullEnd) {
+    nextEnd = fullEnd;
+    nextStart = Math.max(fullStart, nextEnd - nextDuration);
+  }
+  return { start: nextStart, end: nextEnd };
+}
+
+function changeTrendRange(factor) {
+  if (!RESULT || !TREND_FULL_START || !TREND_FULL_END) return;
+  const range = calculateTrendRange(
+    Date.parse($('trendStart').value || TREND_FULL_START),
+    Date.parse($('trendEnd').value || TREND_FULL_END),
+    Date.parse(TREND_FULL_START),
+    Date.parse(TREND_FULL_END),
+    factor,
+  );
+  if (!range) return;
+  $('trendStart').value = formatTrendInput(range.start);
+  $('trendEnd').value = formatTrendInput(range.end);
+  loadTrend($('trendVar').value);
+}
+
+function resetTrendRange() {
+  if (!RESULT || !TREND_FULL_START || !TREND_FULL_END) return;
+  $('trendStart').value = TREND_FULL_START;
+  $('trendEnd').value = TREND_FULL_END;
+  loadTrend($('trendVar').value);
 }
 
 function drawTrend(data) {
@@ -580,6 +699,7 @@ function drawTrend(data) {
   const plotH = height - padT - padB;
   const minT = Math.min(...times);
   const maxT = Math.max(...times);
+  const showDate = !fallback && trendTimeKey(minT) !== trendTimeKey(maxT);
   const xFor = (i) => padL + (fallback ? i / Math.max(1, times.length - 1) : (times[i] - minT) / Math.max(1, maxT - minT)) * plotW;
   const yFor = (v) => padT + (1 - (v - min) / (max - min)) * plotH;
 
@@ -597,7 +717,7 @@ function drawTrend(data) {
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, height - padB); ctx.stroke();
     const j = Math.min(times.length - 1, Math.round(i * (times.length - 1) / 5));
     ctx.textAlign = 'center';
-    const label = fallback ? String(j) : new Date(times[j]).toLocaleTimeString();
+    const label = fallback ? String(j) : formatTrendAxisTime(times[j], showDate);
     ctx.fillText(label, x, height - 16);
   }
 
@@ -622,6 +742,13 @@ function drawTrend(data) {
 function bindTrendEvents() {
   const select = $('trendVar');
   if (select) select.addEventListener('change', () => loadTrend(select.value));
+  ['trendStart', 'trendEnd', 'trendMaxPoints'].forEach((id) => {
+    const input = $(id);
+    if (input) input.addEventListener('change', () => loadTrend($('trendVar').value));
+  });
+  $('trendZoomIn').addEventListener('click', () => changeTrendRange(0.5));
+  $('trendZoomOut').addEventListener('click', () => changeTrendRange(2));
+  $('trendResetRange').addEventListener('click', resetTrendRange);
   const canvas = $('trendCanvas');
   if (!canvas) return;
   canvas.addEventListener('mousemove', (event) => {
