@@ -374,11 +374,12 @@ async function loadPreview() {
     $('pRows').textContent = data.rows + ' 行';
     $('pTimeCol').textContent = data.timeColumn;
     $('pRange').textContent = data.timeRange;
-    $('pVars').textContent = data.columns.map((c) => c.name + (c.numeric ? '' : ' [非数值]')).join('  |  ');
+    $('pVars').textContent = data.columns.map((c) => c.name + (c.processable ? '' : ' [非数值]')).join('  |  ');
     $('previewCard').hidden = false;
     $('configCard').hidden = false;
     buildTable();
-    status(`已载入 ${data.file}，${data.columns.length} 个变量`);
+    const processableCount = data.columns.filter((c) => c.processable).length;
+    status(`已载入 ${data.file}，共 ${data.columns.length} 个变量，其中 ${processableCount} 个可处理变量`);
     if (data.droppedRows) log(`提示：已丢弃 ${data.droppedRows} 行时间无法解析的数据`);
   } catch (err) {
     status('读取失败: ' + err.message, true);
@@ -390,7 +391,7 @@ function buildTable() {
   const body = $('varBody');
   body.textContent = '';
   ROWS = [];
-  COLUMNS.forEach((col) => {
+  COLUMNS.filter((col) => col.processable).forEach((col) => {
     const tr = document.createElement('tr');
 
     const tdCheck = document.createElement('td');
@@ -402,13 +403,6 @@ function buildTable() {
     const tdName = document.createElement('td');
     tdName.className = 'name';
     tdName.textContent = col.name;
-    if (!col.numeric) {
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = ' 非数值';
-      tdName.appendChild(tag);
-    }
-
     const tdMethod = document.createElement('td');
     const sel = document.createElement('select');
     METHODS.forEach((m) => {

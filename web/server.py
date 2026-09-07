@@ -28,7 +28,7 @@ import pandas as pd  # noqa: E402
 from core import exporter, processor  # noqa: E402
 from core.filter import DEFAULT_PARAMS, METHOD_LABELS, METHODS, format_params, parse_params  # noqa: E402
 from core.loader import SUPPORTED_SUFFIXES  # noqa: E402
-from core.resample import PRESET_RULES  # noqa: E402
+from core.resample import PRESET_RULES, numeric_like_frame  # noqa: E402
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -216,7 +216,7 @@ def _pick_native(mode: str, initial_path: str) -> dict:
 
 def _preview(path: str) -> dict:
     loaded = processor.inspect_file(path)
-    frame = loaded.frame
+    processable_names = {str(column) for column in numeric_like_frame(loaded.frame).columns}
     return {
         "file": loaded.source.name,
         "path": str(loaded.source),
@@ -225,7 +225,11 @@ def _preview(path: str) -> dict:
         "timeRange": loaded.time_range_text,
         "droppedRows": loaded.dropped_rows,
         "columns": [
-            {"name": name, "numeric": bool(pd.api.types.is_numeric_dtype(frame[name]))}
+            {
+                "name": name,
+                "processable": name in processable_names,
+                "numeric": name in processable_names,
+            }
             for name in loaded.columns
         ],
     }

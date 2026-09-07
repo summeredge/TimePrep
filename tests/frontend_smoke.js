@@ -14,6 +14,7 @@ function makeElement(tag, id) {
     tagName: String(tag).toUpperCase(), id: id || "", textContent: "", value: "", className: "",
     hidden: false, disabled: false, style: {}, checked: false, children: [], _listeners: {},
     appendChild(c) { this.children.push(c); return c; },
+    append(...children) { this.children.push(...children); },
     addEventListener(t, fn) { (this._listeners[t] || (this._listeners[t] = [])).push(fn); },
     dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach(fn => fn(ev)); return true; },
   };
@@ -47,7 +48,7 @@ function execute(stub) {
     ${pageScript.replace(/\bapiReady\b/g, "__apiReady").replace(/\bversionMismatch\b/g, "__versionMismatch")}
     REF.apiReady = () => __apiReady;
     REF.versionMismatch = () => __versionMismatch;
-    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService };
+    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService, loadPreview, buildTable };
   `);
   const ctx = fn(global.fetch);
   Object.defineProperty(ctx, "apiReady", { get() { return ctx.ref.apiReady(); }, configurable: true });
@@ -102,6 +103,26 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       result.runDisabled = elements.runBtn.disabled;
       result.hasDisableAll = /querySelectorAll\(['"]button['"]\)[\s\S]{0,80}button\.disabled\s*=\s*true\b/.test(pageScript);
       result.hasVersionMismatchTrue = /versionMismatch\s*=\s*true\b/.test(pageScript);
+    } else if (scenario === "preview_processable_rows") {
+      const exec = execute((url) => {
+        if (url === "/api/health") return HEALTH_OK;
+        if (url === "/api/methods") return METHODS_OK;
+        return {
+          file: "industrial.csv", path: "C:/data/industrial.csv", rows: 4,
+          timeColumn: "Time", timeRange: "2026-09-01 ~ 2026-09-01", droppedRows: 0,
+          columns: [
+            { name: "TIC101", processable: true },
+            { name: "Mode", processable: false },
+          ],
+        };
+      });
+      await exec.connectService();
+      elements.inputPath.value = "C:/data/industrial.csv";
+      await exec.loadPreview();
+      result.varsText = elements.pVars.textContent;
+      result.tableRows = elements.varBody.children.length;
+      result.rowNames = elements.varBody.children.map((row) => row.children[1].textContent);
+      result.status = elements.status.textContent;
     }
   } catch (err) { result.error = String(err && err.stack || err); }
   console.log(JSON.stringify(result));

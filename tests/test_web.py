@@ -120,6 +120,30 @@ class WebApiTests(unittest.TestCase):
             status, result = self.request("POST", "/api/process", {})
         self.assertEqual((status, result), (200, {"processed": True}))
 
+    def test_preview_marks_numeric_like_columns_processable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "industrial.csv"
+            pd.DataFrame(
+                {
+                    "Time": pd.date_range("2026-09-01 10:00", periods=4, freq="min"),
+                    "TIC101": [85.1, 85.3, "Bad", 85.4],
+                    "PIC102": [10.1, "Scan Off", 10.2, 10.4],
+                    "Mode": ["AUTO", "AUTO", "AUTO", "MAN"],
+                }
+            ).to_csv(source, index=False)
+
+            status, result = self.request("POST", "/api/preview", {"path": str(source)})
+
+        self.assertEqual(status, 200)
+        columns = {item["name"]: item for item in result["columns"]}
+        self.assertTrue(columns["TIC101"]["processable"])
+        self.assertTrue(columns["PIC102"]["processable"])
+        self.assertFalse(columns["Mode"]["processable"])
+        self.assertEqual(
+            {name: item["numeric"] for name, item in columns.items()},
+            {name: item["processable"] for name, item in columns.items()},
+        )
+
     def test_api_process_needs_no_output_dir_and_does_not_create_csv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -343,6 +367,8 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("async function exportResult", script)
         self.assertIn("async function loadTrend", script)
         self.assertIn("JSON.stringify({ inputPath, rule, variables })", script)
+        self.assertIn("processable", script)
+        self.assertNotIn(".numeric", script)
         self.assertIn(
             "grid-template-columns: minmax(0, 35fr) minmax(0, 65fr)", page
         )
@@ -436,6 +462,12 @@ class WebApiTests(unittest.TestCase):
             "never_disable": [
                 ("runDisabled", False),
                 ("hasDisableAll", False),
+            ],
+            "preview_processable_rows": [
+                ("varsText", "TIC101  |  Mode [非数值]"),
+                ("tableRows", 1),
+                ("rowNames", ["TIC101"]),
+                ("status", "已载入 industrial.csv，共 2 个变量，其中 1 个可处理变量"),
             ],
         }.items():
             completed = subprocess.run(
