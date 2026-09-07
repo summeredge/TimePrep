@@ -54,11 +54,6 @@
   .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 20px; }
   .grid div span { color: var(--muted); display: inline-block; min-width: 68px; }
-  .varlist {
-    margin-top: 10px; max-height: 74px; overflow: auto; padding: 8px 10px;
-    background: var(--accent-soft); border-radius: 5px; font-size: 12px;
-    font-family: Consolas, monospace; word-break: break-all;
-  }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
   th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; }
@@ -115,7 +110,7 @@
 <main class="workspace">
   <div class="left">
     <section>
-      <h2>1. 文件</h2>
+      <h2>文件</h2>
       <div class="row">
         <label>输入文件</label>
         <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件">
@@ -129,10 +124,8 @@
       <div class="grid">
         <div><span>文件名</span><b id="pFile">-</b></div>
         <div><span>数据行数</span><b id="pRows">-</b></div>
-        <div><span>时间列</span><b id="pTimeCol">-</b></div>
         <div><span>时间范围</span><b id="pRange">-</b></div>
       </div>
-      <div class="varlist" id="pVars"></div>
     </section>
 
     <section id="configCard" hidden>
@@ -157,7 +150,7 @@
     </section>
 
     <section>
-      <h2>4. 处理</h2>
+      <h2>处理</h2>
       <div class="row">
         <button class="primary" id="runBtn" onclick="run()">开始处理</button>
         <button id="reconnectBtn" onclick="reconnect()" hidden>重新检测服务</button>
@@ -168,7 +161,7 @@
     </section>
 
     <section>
-      <h2>5. 导出</h2>
+      <h2>导出</h2>
       <div class="row">
         <label>输出目录</label>
         <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录">
@@ -372,9 +365,7 @@ async function loadPreview() {
     COLUMNS = data.columns;
     $('pFile').textContent = data.file;
     $('pRows').textContent = data.rows + ' 行';
-    $('pTimeCol').textContent = data.timeColumn;
     $('pRange').textContent = data.timeRange;
-    $('pVars').textContent = data.columns.map((c) => c.name + (c.processable ? '' : ' [非数值]')).join('  |  ');
     $('previewCard').hidden = false;
     $('configCard').hidden = false;
     buildTable();

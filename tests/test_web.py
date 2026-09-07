@@ -464,7 +464,6 @@ class WebApiTests(unittest.TestCase):
                 ("hasDisableAll", False),
             ],
             "preview_processable_rows": [
-                ("varsText", "TIC101  |  Mode [非数值]"),
                 ("tableRows", 1),
                 ("rowNames", ["TIC101"]),
                 ("status", "已载入 industrial.csv，共 2 个变量，其中 1 个可处理变量"),

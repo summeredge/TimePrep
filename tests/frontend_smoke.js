@@ -23,7 +23,7 @@ function makeElement(tag, id) {
   return el;
 }
 const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","status","log","previewCard","configCard",
-             "pFile","pRows","pTimeCol","pRange","pVars","varBody","outputPath","runBtn","reconnectBtn",
+             "pFile","pRows","pRange","varBody","outputPath","runBtn","reconnectBtn",
              "exportBtn","trendVar","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
 ids.forEach(id => makeElement((id === "runBtn" || id === "reconnectBtn" || id === "exportBtn") ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : "div")), id));
 const documentShim = {
@@ -119,7 +119,6 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       await exec.connectService();
       elements.inputPath.value = "C:/data/industrial.csv";
       await exec.loadPreview();
-      result.varsText = elements.pVars.textContent;
       result.tableRows = elements.varBody.children.length;
       result.rowNames = elements.varBody.children.map((row) => row.children[1].textContent);
       result.status = elements.status.textContent;
