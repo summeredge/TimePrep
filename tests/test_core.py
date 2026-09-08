@@ -224,7 +224,7 @@ class CoreProcessingTests(unittest.TestCase):
         self.assertEqual(METHODS, (NONE, MOVING_AVERAGE, FIRST_ORDER_LOWPASS, EWM))
         self.assertEqual(
             [METHOD_LABELS[key] for key in METHODS],
-            ["无滤波", "移动平均", "一阶低通滤波", "指数移动平均 (EMA)"],
+            ["无滤波", "移动平均", "一阶低通滤波", "指数移动平均"],
         )
         self.assertEqual(DEFAULT_PARAMS[FIRST_ORDER_LOWPASS], {"tau": "10min"})
 
@@ -272,7 +272,7 @@ class CoreProcessingTests(unittest.TestCase):
         series = pd.Series([0.0, 1.0, 1.0, 1.0], index=index)
 
         for tau in (0, -1, "not-a-duration"):
-            with self.assertRaisesRegex(ValueError, "tau"):
+            with self.assertRaisesRegex(ValueError, "时间常数"):
                 filter_column(series, FIRST_ORDER_LOWPASS, {"tau": tau})
 
     def test_first_order_lowpass_requires_datetime_index(self):

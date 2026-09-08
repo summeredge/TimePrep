@@ -73,7 +73,7 @@ class WebApiTests(unittest.TestCase):
                 ("none", "无滤波", ""),
                 ("moving_average", "移动平均", "window=5"),
                 ("first_order_lowpass", "一阶低通滤波", "tau=10min"),
-                ("ewm", "指数移动平均 (EMA)", "alpha=0.2"),
+                ("ewm", "指数移动平均", "alpha=0.2"),
             ],
         )
 
@@ -516,7 +516,7 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("async function reconnect", script)
         self.assertIn("apiReady = true;", script)
         self.assertIn("versionMismatch = false;", script)
-        self.assertIn("TimePrep 前后端版本不一致", page)
+        self.assertIn("前后端版本不一致", page)
         self.assertIn("重新检测服务", page)
         self.assertGreaterEqual(page.count("if (!requireApi()) return;"), 4)
         self.assertNotIn("document.querySelectorAll('button').forEach((button) => { button.disabled = true; })", script)

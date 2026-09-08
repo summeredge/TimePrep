@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>工业时序数据预处理工具 MVP</title>
+<title>工业时序数据预处理工具</title>
 <style>
   :root {
     --bg: #f5f6f8;
@@ -115,8 +115,8 @@
 </head>
 <body>
 <header>
-  <h1>工业时序数据预处理工具 MVP</h1>
-  <p>读取 CSV / Excel / TXT &rarr; 时间排序 &rarr; 重采样 &rarr; 按变量滤波 &rarr; 趋势确认 &rarr; 导出 CSV</p>
+  <h1>工业时序数据预处理工具</h1>
+  <p>读取数据文件 &rarr; 时间排序 &rarr; 重采样 &rarr; 分变量滤波 &rarr; 趋势确认 &rarr; 导出结果</p>
 </header>
 
 <main class="workspace">
@@ -125,10 +125,10 @@
       <h2>文件</h2>
       <div class="row">
         <label>输入文件</label>
-        <input type="text" class="path" id="inputPath" placeholder="选择 PI / DCS 导出的 CSV、Excel 或 TXT 文件">
+        <input type="text" class="path" id="inputPath" placeholder="选择工业系统导出的数据文件">
         <button onclick="pickNative('file')">浏览...</button>
       </div>
-      <p class="hint">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b>直接拖放到本页任意位置</b>（会复制一份到项目 uploads 目录，原文件不动）。手动输入路径后按 Enter 读取文件信息。</p>
+      <p class="hint">支持 .csv / .txt / .xls / .xlsx / .xlsm；源文件不会被修改。也可把文件<b>直接拖放到本页任意位置</b>（副本保存到上传目录，原文件不动）。手动输入路径后按回车键读取文件信息。</p>
     </section>
 
     <section id="previewCard" hidden>
@@ -146,7 +146,7 @@
         <label>重采样</label>
         <select id="ruleSelect"></select>
         <input type="text" id="ruleCustom" style="width:110px" placeholder="自定义周期">
-        <span class="hint" style="margin:0">留空 = 不重采样；自定义示例 30s / 15min / 1H</span>
+        <span class="hint" style="margin:0">留空表示不重采样；示例：30 秒（30s）、15 分钟（15min）、1 小时（1h）</span>
       </div>
       <div class="row" style="margin-top:12px">
         <button class="primary" id="runBtn" onclick="run()">开始处理</button>
@@ -178,7 +178,7 @@
       <h2>导出</h2>
       <div class="row">
         <label>输出目录</label>
-        <input type="text" class="path" id="outputDir" placeholder="处理后 CSV 的保存目录">
+        <input type="text" class="path" id="outputDir" placeholder="处理结果保存目录">
         <button onclick="pickNative('dir')">浏览...</button>
         <button id="exportBtn" onclick="exportResult()">导出</button>
       </div>
@@ -284,7 +284,7 @@ function showVersionMismatch() {
   versionMismatch = true;
   apiReady = false;
   $('reconnectBtn').hidden = false;
-  status('TimePrep 前后端版本不一致，请点击“重新检测服务”或重启 TimePrep 服务。', true);
+  status('前后端版本不一致，请重新检测服务或重启服务。', true);
 }
 
 function showServiceError(message) {
@@ -441,7 +441,7 @@ function buildTable() {
     const params = document.createElement('input');
     params.type = 'text';
     params.style.width = '100%';
-    params.placeholder = '如 window=5, tau=10min, alpha=0.2';
+    params.placeholder = '选择滤波方式后自动填写参数';
     tdParams.appendChild(params);
     params.addEventListener('input', invalidateConfig);
     params.addEventListener('change', invalidateConfig);
@@ -801,7 +801,7 @@ async function pickNative(mode) {
 }
 
 /* ---------- 拖放文件 ---------- */
-/* 浏览器不暴露本地绝对路径，拖放只能拿到文件内容，因此上传一份副本到 uploads 目录 */
+/* 浏览器不暴露本地绝对路径，拖放只能拿到文件内容，因此上传一份副本到上传目录 */
 let dragDepth = 0;
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((type) => {
   document.addEventListener(type, (e) => {
@@ -830,7 +830,7 @@ async function uploadFile(file) {
     });
     $('inputPath').value = data.path;
     if (!$('outputDir').value.trim()) $('outputDir').value = data.path.replace(/[\/\\][^\/\\]+$/, '');
-    log(`拖放载入：${data.name}（${(data.size / 1024).toFixed(1)} KB） -> ${data.path}`);
+    log(`拖放载入：${data.name}（${(data.size / 1024).toFixed(1)} 千字节） → ${data.path}`);
     await loadPreview();
   } catch (err) {
     status('上传失败: ' + err.message, true);

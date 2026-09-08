@@ -22,7 +22,7 @@ METHOD_LABELS = {
     NONE: "无滤波",
     MOVING_AVERAGE: "移动平均",
     FIRST_ORDER_LOWPASS: "一阶低通滤波",
-    EWM: "指数移动平均 (EMA)",
+    EWM: "指数移动平均",
 }
 
 DEFAULT_PARAMS = {
@@ -82,7 +82,7 @@ def _apply(x: np.ndarray, method: str, params: dict, index: pd.Index) -> np.ndar
 def _moving_average(x: np.ndarray, params: dict) -> np.ndarray:
     window = int(params["window"])
     if window < 2:
-        raise ValueError("移动平均 window 必须 >= 2")
+        raise ValueError("移动平均窗口必须不小于 2")
     series = pd.Series(x)
     return series.rolling(window, min_periods=1).mean().to_numpy()
 
@@ -90,7 +90,7 @@ def _moving_average(x: np.ndarray, params: dict) -> np.ndarray:
 def _ewm(x: np.ndarray, params: dict) -> np.ndarray:
     alpha = float(params["alpha"])
     if not 0 < alpha <= 1:
-        raise ValueError("EMA alpha 必须在 (0, 1] 区间内")
+        raise ValueError("指数移动平均系数必须大于 0 且不大于 1")
     return pd.Series(x).ewm(alpha=alpha, adjust=False).mean().to_numpy()
 
 
@@ -110,9 +110,9 @@ def _parse_tau(value) -> pd.Timedelta:
     try:
         tau = pd.to_timedelta(value)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("一阶低通 tau 必须是大于 0 的时间间隔") from exc
+        raise ValueError("一阶低通时间常数必须是大于 0 的时间间隔") from exc
     if not isinstance(tau, pd.Timedelta) or pd.isna(tau) or tau <= pd.Timedelta(0):
-        raise ValueError("一阶低通 tau 必须是大于 0 的时间间隔")
+        raise ValueError("一阶低通时间常数必须是大于 0 的时间间隔")
     return tau
 
 
