@@ -54,10 +54,20 @@
   .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 20px; }
   .grid div span { color: var(--muted); display: inline-block; min-width: 68px; }
-  table { width: 100%; border-collapse: collapse; }
+  .time-range { display: flex; grid-column: 1 / -1; align-items: baseline; gap: 8px; min-width: 0; }
+  .time-range > span { flex: none; }
+  .time-range > b {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
   th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; }
-  td.name { font-family: Consolas, monospace; }
+  td.name {
+    font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .variable-table .name-column { width: 30%; }
+  .variable-table .method-column { width: 34%; }
+  .variable-table select, .variable-table td:last-child input { width: 100%; min-width: 0; }
   .tablewrap { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
   #status { margin-left: 10px; color: var(--muted); }
@@ -126,7 +136,7 @@
       <div class="grid">
         <div><span>文件名</span><b id="pFile">-</b></div>
         <div><span>数据行数</span><b id="pRows">-</b></div>
-        <div><span>时间范围</span><b id="pRange">-</b></div>
+        <div class="time-range"><span>时间范围</span><b id="pRange">-</b></div>
       </div>
     </section>
 
@@ -139,13 +149,16 @@
         <span class="hint" style="margin:0">留空 = 不重采样；自定义示例 30s / 15min / 1H</span>
       </div>
       <div class="row" style="margin-top:12px">
+        <button class="primary" id="runBtn" onclick="run()">开始处理</button>
+      </div>
+      <div class="row" style="margin-top:12px">
         <button onclick="selectAll(true)">全选</button>
         <button onclick="selectAll(false)">全不选</button>
         <span class="hint" style="margin:0">勾选的变量才会滤波；未勾选变量原样输出</span>
       </div>
       <div class="tablewrap">
-        <table>
-          <thead><tr><th style="width:52px">处理</th><th>变量</th><th style="width:200px">滤波方式</th><th style="width:260px">参数</th></tr></thead>
+        <table class="variable-table">
+          <thead><tr><th style="width:52px">处理</th><th class="name-column">变量</th><th class="method-column">滤波方式</th><th>参数</th></tr></thead>
           <tbody id="varBody"></tbody>
         </table>
       </div>
@@ -154,7 +167,6 @@
     <section>
       <h2>处理</h2>
       <div class="row">
-        <button class="primary" id="runBtn" onclick="run()">开始处理</button>
         <button id="reconnectBtn" onclick="reconnect()" hidden>重新检测服务</button>
         <span id="status">请选择输入文件</span>
       </div>
@@ -414,6 +426,7 @@ function buildTable() {
     const tdName = document.createElement('td');
     tdName.className = 'name';
     tdName.textContent = col.name;
+    tdName.title = col.name;
     const tdMethod = document.createElement('td');
     const sel = document.createElement('select');
     METHODS.forEach((m) => {
