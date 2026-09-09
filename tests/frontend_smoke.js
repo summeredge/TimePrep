@@ -21,14 +21,14 @@ function makeElement(tag, id) {
     dispatchEvent(ev) { (this._listeners[ev.type] || []).forEach(fn => fn(ev)); return true; },
   };
   if (id) { elements[id] = el; }
-  if (["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) { buttons[id] = el; }
+  if (["runBtn", "reconnectBtn", "exportBtn", "selectAllBtn", "selectNoneBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) { buttons[id] = el; }
   return el;
 }
-const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","tagFilter","status","log","previewCard","configCard",
+const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","tagFilter","selectAllBtn","selectNoneBtn","status","log","previewCard","configCard",
              "pFile","pRows","pRange","varBody","outputPath","runBtn","reconnectBtn",
              "exportBtn","trendVar","trendStart","trendEnd","trendMaxPoints","trendZoomIn",
              "trendZoomOut","trendResetRange","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
-ids.forEach(id => makeElement((["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : (id === "tagFilter" ? "input" : "div"))), id));
+ids.forEach(id => makeElement((["runBtn", "reconnectBtn", "exportBtn", "selectAllBtn", "selectNoneBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : (id === "tagFilter" ? "input" : "div"))), id));
 elements.trendMaxPoints.value = "2000";
 const documentShim = {
   getElementById(id) { return elements[id] || null; },
@@ -164,9 +164,18 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       await exec.loadPreview();
 
       const firstRow = elements.varBody.children[0];
-      firstRow.children[0].children[0].checked = true;
+      result.initialLabels = [elements.selectAllBtn.textContent, elements.selectNoneBtn.textContent];
+      exec.selectAll(true);
+      result.globalAllChecked = rows().every((row) => row.checked);
+      exec.selectAll(false);
+      result.globalNoneChecked = rows().every((row) => !row.checked);
+
+      firstRow.children[0].children[0].checked = false;
       firstRow.children[2].children[0].value = "median";
       firstRow.children[3].children[0].value = "window=5";
+      elements.varBody.children[1].children[0].children[0].checked = false;
+      elements.varBody.children[2].children[0].children[0].checked = true;
+      elements.varBody.children[3].children[0].children[0].checked = false;
       elements.tagFilter.value = " FIC ";
       elements.tagFilter.dispatchEvent({ type: "input" });
       const ficTrimmed = rows().filter((row) => !row.hidden).map((row) => row.name);
@@ -175,8 +184,21 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       const ficLower = rows().filter((row) => !row.hidden).map((row) => row.name);
       result.ficMatchesSame = JSON.stringify(ficTrimmed) === JSON.stringify(ficLower);
       result.ficVisible = ficLower;
+      result.filteredLabels = [elements.selectAllBtn.textContent, elements.selectNoneBtn.textContent];
+      const hiddenBeforeBulk = rows().filter((row) => row.hidden).map((row) => row.checked);
       exec.selectAll(true);
-      result.selectAllChecked = rows().every((row) => row.checked);
+      result.filteredVisibleAfterSelectAll = rows().filter((row) => !row.hidden).map((row) => row.checked);
+      result.hiddenAfterSelectAll = rows().filter((row) => row.hidden).map((row) => row.checked);
+      result.hiddenPreservedAfterSelectAll = JSON.stringify(hiddenBeforeBulk) === JSON.stringify(result.hiddenAfterSelectAll);
+      exec.selectAll(false);
+      result.filteredVisibleAfterSelectNone = rows().filter((row) => !row.hidden).map((row) => row.checked);
+      result.hiddenAfterSelectNone = rows().filter((row) => row.hidden).map((row) => row.checked);
+      result.hiddenPreservedAfterSelectNone = JSON.stringify(hiddenBeforeBulk) === JSON.stringify(result.hiddenAfterSelectNone);
+      elements.tagFilter.value = "";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      result.clearedLabels = [elements.selectAllBtn.textContent, elements.selectNoneBtn.textContent];
+      exec.selectAll(true);
+      result.clearFilterGlobalChecked = rows().every((row) => row.checked);
       await exec.run();
       const resultBeforeFilter = exec.getResult();
       const stateBefore = rows()[0];
@@ -191,10 +213,27 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       result.stateAfter = rows()[0];
       result.resultStillSame = exec.getResult() === resultBeforeFilter;
 
+      firstRow.children[0].children[0].checked = false;
+      elements.tagFilter.value = "ZZZ_NOT_FOUND";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      result.noMatchLabels = [elements.selectAllBtn.textContent, elements.selectNoneBtn.textContent];
+      const noMatchStateBefore = rows().map((row) => row.checked);
+      const resultBeforeNoMatch = exec.getResult();
+      exec.selectAll(true);
+      result.noMatchStateSame = JSON.stringify(rows().map((row) => row.checked)) === JSON.stringify(noMatchStateBefore);
+      result.noMatchResultSame = exec.getResult() === resultBeforeNoMatch;
+
+      elements.tagFilter.value = "";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      exec.selectAll(true);
+      result.clearAfterNoMatchGlobalChecked = rows().every((row) => row.checked);
+      result.clearAfterNoMatchInvalidated = exec.getResult() === null;
+
       elements.inputPath.value = "C:/data/other.csv";
       await exec.loadPreview();
       result.filterAfterReload = elements.tagFilter.value;
       result.visibleAfterReload = rows().filter((row) => !row.hidden).map((row) => row.name);
+      result.reloadLabels = [elements.selectAllBtn.textContent, elements.selectNoneBtn.textContent];
     } else if (scenario === "trend_range") {
       const exec = execute((url) => url === "/api/health" ? HEALTH_OK : METHODS_OK);
       const fullStart = Date.parse("2026-09-01T00:00:00");

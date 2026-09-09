@@ -510,6 +510,11 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("addEventListener('input', invalidateConfig)", script)
         self.assertIn("配置已修改，请重新处理", page)
         self.assertIn("输入文件已修改，请重新处理", page)
+        self.assertIn('id="selectAllBtn"', page)
+        self.assertIn('id="selectNoneBtn"', page)
+        self.assertIn("function updateBulkSelectionLabels()", script)
+        self.assertIn("全选筛选结果", script)
+        self.assertIn("全不选筛选结果", script)
 
         trend_script = script[
             script.index("function bindTrendEvents") : script.index(
@@ -587,9 +592,20 @@ class WebApiTests(unittest.TestCase):
             "tag_filter": [
                 ("ficMatchesSame", True),
                 ("ficVisible", ["FIC706007.PV", "FIC0706004.PV"]),
+                ("initialLabels", ["全选", "全不选"]),
+                ("globalAllChecked", True),
+                ("globalNoneChecked", True),
+                ("filteredLabels", ["全选筛选结果", "全不选筛选结果"]),
+                ("filteredVisibleAfterSelectAll", [True, True]),
+                ("hiddenAfterSelectAll", [True, False]),
+                ("hiddenPreservedAfterSelectAll", True),
+                ("filteredVisibleAfterSelectNone", [False, False]),
+                ("hiddenAfterSelectNone", [True, False]),
+                ("hiddenPreservedAfterSelectNone", True),
+                ("clearedLabels", ["全选", "全不选"]),
+                ("clearFilterGlobalChecked", True),
                 ("sixVisible", ["FIC706007.PV", "FIC0706004.PV", "S_C706"]),
                 ("allVisible", ["FIC706007.PV", "FIC0706004.PV", "S_C706", "TEMP101"]),
-                ("selectAllChecked", True),
                 ("stateBefore", {
                     "name": "FIC706007.PV", "hidden": False, "checked": True,
                     "method": "median", "params": "window=5",
@@ -599,8 +615,14 @@ class WebApiTests(unittest.TestCase):
                     "method": "median", "params": "window=5",
                 }),
                 ("resultStillSame", True),
+                ("noMatchLabels", ["全选筛选结果", "全不选筛选结果"]),
+                ("noMatchStateSame", True),
+                ("noMatchResultSame", True),
+                ("clearAfterNoMatchGlobalChecked", True),
+                ("clearAfterNoMatchInvalidated", True),
                 ("filterAfterReload", ""),
                 ("visibleAfterReload", ["NEW706", "OTHER"]),
+                ("reloadLabels", ["全选", "全不选"]),
             ],
             "trend_range": [
                 ("zoomInDuration", 0.5),

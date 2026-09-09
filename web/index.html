@@ -153,8 +153,8 @@
         <button class="primary" id="runBtn" onclick="run()">开始处理</button>
       </div>
       <div class="row" style="margin-top:12px">
-        <button onclick="selectAll(true)">全选</button>
-        <button onclick="selectAll(false)">全不选</button>
+        <button id="selectAllBtn" onclick="selectAll(true)">全选</button>
+        <button id="selectNoneBtn" onclick="selectAll(false)">全不选</button>
         <span class="hint" style="margin:0">勾选的变量才会滤波；未勾选变量原样输出</span>
       </div>
       <div class="row" style="margin-top:12px">
@@ -472,11 +472,20 @@ function applyTagFilter() {
   ROWS.forEach((row) => {
     row.tr.hidden = keyword !== '' && !row.name.toLowerCase().includes(keyword);
   });
+  updateBulkSelectionLabels();
+}
+
+function updateBulkSelectionLabels() {
+  const hasFilter = $('tagFilter').value.trim() !== '';
+  $('selectAllBtn').textContent = hasFilter ? '全选筛选结果' : '全选';
+  $('selectNoneBtn').textContent = hasFilter ? '全不选筛选结果' : '全不选';
 }
 
 function selectAll(value) {
-  const changed = ROWS.some((row) => row.check.checked !== value);
-  ROWS.forEach((row) => { row.check.checked = value; });
+  const hasFilter = $('tagFilter').value.trim() !== '';
+  const targets = hasFilter ? ROWS.filter((row) => !row.tr.hidden) : ROWS;
+  const changed = targets.some((row) => row.check.checked !== value);
+  targets.forEach((row) => { row.check.checked = value; });
   if (!changed) return;
   if (RESULT) invalidateConfig(); else updateSelection();
 }
