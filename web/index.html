@@ -43,6 +43,7 @@
     font: inherit; background: #fff; color: var(--text);
   }
   input.path { flex: 1; min-width: 180px; font-family: Consolas, monospace; font-size: 13px; }
+  #tagFilter { flex: 1; min-width: 180px; }
   button {
     border: 1px solid var(--border); background: #fff; color: var(--text);
     border-radius: 5px; padding: 6px 13px; font: inherit; cursor: pointer;
@@ -156,6 +157,10 @@
         <button onclick="selectAll(false)">全不选</button>
         <span class="hint" style="margin:0">勾选的变量才会滤波；未勾选变量原样输出</span>
       </div>
+      <div class="row" style="margin-top:12px">
+        <label for="tagFilter">位号筛选</label>
+        <input id="tagFilter" type="text" placeholder="输入位号关键字">
+      </div>
       <div class="tablewrap">
         <table class="variable-table">
           <thead><tr><th style="width:52px">处理</th><th class="name-column">变量</th><th class="method-column">滤波方式</th><th>参数</th></tr></thead>
@@ -219,7 +224,7 @@
 const EXPECTED_API_VERSION = 2;
 let METHODS = [];
 let COLUMNS = [];
-let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params }
+let ROWS = [];   // 与 COLUMNS 同序：{ check, method, params, tr }
 let apiReady = false;
 let versionMismatch = false;
 let RESULT = null;
@@ -348,6 +353,7 @@ async function reconnect() {
   $('ruleSelect').addEventListener('change', invalidateConfig);
   $('ruleCustom').addEventListener('input', invalidateConfig);
   $('ruleCustom').addEventListener('change', invalidateConfig);
+  $('tagFilter').addEventListener('input', applyTagFilter);
   bindTrendEvents();
   connectService();
 })();
@@ -414,6 +420,7 @@ function buildTable() {
   const body = $('varBody');
   body.textContent = '';
   ROWS = [];
+  $('tagFilter').value = '';
   COLUMNS.filter((col) => col.processable).forEach((col) => {
     const tr = document.createElement('tr');
 
@@ -454,9 +461,17 @@ function buildTable() {
 
     tr.append(tdCheck, tdName, tdMethod, tdParams);
     body.appendChild(tr);
-    ROWS.push({ name: col.name, check, method: sel, params });
+    ROWS.push({ name: col.name, check, method: sel, params, tr });
   });
   updateSelection();
+  applyTagFilter();
+}
+
+function applyTagFilter() {
+  const keyword = $('tagFilter').value.trim().toLowerCase();
+  ROWS.forEach((row) => {
+    row.tr.hidden = keyword !== '' && !row.name.toLowerCase().includes(keyword);
+  });
 }
 
 function selectAll(value) {

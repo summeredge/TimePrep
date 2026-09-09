@@ -11,8 +11,10 @@ const elements = {};
 const buttons = {};
 function makeElement(tag, id) {
   const el = {
-    tagName: String(tag).toUpperCase(), id: id || "", textContent: "", value: "", className: "",
+    tagName: String(tag).toUpperCase(), id: id || "", value: "", className: "",
     hidden: false, disabled: false, style: {}, checked: false, children: [], _listeners: {},
+    get textContent() { return this._textContent || ""; },
+    set textContent(value) { this._textContent = String(value); if (value === "") this.children = []; },
     appendChild(c) { this.children.push(c); return c; },
     append(...children) { this.children.push(...children); },
     addEventListener(t, fn) { (this._listeners[t] || (this._listeners[t] = [])).push(fn); },
@@ -22,11 +24,11 @@ function makeElement(tag, id) {
   if (["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) { buttons[id] = el; }
   return el;
 }
-const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","status","log","previewCard","configCard",
+const ids = ["inputPath","outputDir","ruleSelect","ruleCustom","tagFilter","status","log","previewCard","configCard",
              "pFile","pRows","pRange","varBody","outputPath","runBtn","reconnectBtn",
              "exportBtn","trendVar","trendStart","trendEnd","trendMaxPoints","trendZoomIn",
              "trendZoomOut","trendResetRange","trendPlaceholder","trendChartWrap","trendCanvas","trendTooltip"];
-ids.forEach(id => makeElement((["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : "div")), id));
+ids.forEach(id => makeElement((["runBtn", "reconnectBtn", "exportBtn", "trendZoomIn", "trendZoomOut", "trendResetRange"].includes(id)) ? "button" : (id === "trendVar" ? "select" : (id === "trendCanvas" ? "canvas" : (id === "tagFilter" ? "input" : "div"))), id));
 elements.trendMaxPoints.value = "2000";
 const documentShim = {
   getElementById(id) { return elements[id] || null; },
@@ -50,7 +52,7 @@ function execute(stub) {
     ${pageScript.replace(/\bapiReady\b/g, "__apiReady").replace(/\bversionMismatch\b/g, "__versionMismatch")}
     REF.apiReady = () => __apiReady;
     REF.versionMismatch = () => __versionMismatch;
-    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService, loadPreview, buildTable, calculateTrendRange, setTrendFullRange, formatTrendAxisTime };
+    return { ref: REF, connectService, reconnect, api, requireApi, showVersionMismatch, showServiceError, markServiceReady, applyMethods, fetchService, loadPreview, buildTable, applyTagFilter, selectAll, run, getResult: () => RESULT, calculateTrendRange, setTrendFullRange, formatTrendAxisTime };
   `);
   const ctx = fn(global.fetch);
   Object.defineProperty(ctx, "apiReady", { get() { return ctx.ref.apiReady(); }, configurable: true });
@@ -58,7 +60,7 @@ function execute(stub) {
   return ctx;
 }
 const HEALTH_OK = { app: "TimePrep", apiVersion: 2, pid: 1 };
-const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数", defaultParams: "" }], presetRules: ["", "1s"] };
+const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数", defaultParams: "" }], presetRules: ["", "1min", "5min"] };
 (async () => {
   const result = {};
   try {
@@ -124,6 +126,75 @@ const METHODS_OK = { apiVersion: 2, methods: [{ key: "median", label: "中位数
       result.tableRows = elements.varBody.children.length;
       result.rowNames = elements.varBody.children.map((row) => row.children[1].textContent);
       result.status = elements.status.textContent;
+    } else if (scenario === "tag_filter") {
+      let previewCount = 0;
+      const rows = () => elements.varBody.children.map((row) => ({
+        name: row.children[1].textContent,
+        hidden: row.hidden,
+        checked: row.children[0].children[0].checked,
+        method: row.children[2].children[0].value,
+        params: row.children[3].children[0].value,
+      }));
+      const exec = execute((url) => {
+        if (url === "/api/health") return HEALTH_OK;
+        if (url === "/api/methods") return METHODS_OK;
+        if (url === "/api/process") return {
+          processed: [], messages: [], rowsIn: 4, rowsOut: 4,
+          timeStart: "2026-09-01 00:00:00", timeEnd: "2026-09-01 00:03:00",
+        };
+        previewCount += 1;
+        const first = previewCount === 1;
+        return {
+          file: first ? "industrial.csv" : "other.csv",
+          path: first ? "C:/data/industrial.csv" : "C:/data/other.csv",
+          rows: 4, timeColumn: "Time", timeRange: "2026-09-01 ~ 2026-09-01", droppedRows: 0,
+          columns: first ? [
+            { name: "FIC706007.PV", processable: true },
+            { name: "FIC0706004.PV", processable: true },
+            { name: "S_C706", processable: true },
+            { name: "TEMP101", processable: true },
+          ] : [
+            { name: "NEW706", processable: true },
+            { name: "OTHER", processable: true },
+          ],
+        };
+      });
+      await exec.connectService();
+      elements.inputPath.value = "C:/data/industrial.csv";
+      await exec.loadPreview();
+
+      const firstRow = elements.varBody.children[0];
+      firstRow.children[0].children[0].checked = true;
+      firstRow.children[2].children[0].value = "median";
+      firstRow.children[3].children[0].value = "window=5";
+      elements.tagFilter.value = " FIC ";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      const ficTrimmed = rows().filter((row) => !row.hidden).map((row) => row.name);
+      elements.tagFilter.value = "fic";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      const ficLower = rows().filter((row) => !row.hidden).map((row) => row.name);
+      result.ficMatchesSame = JSON.stringify(ficTrimmed) === JSON.stringify(ficLower);
+      result.ficVisible = ficLower;
+      exec.selectAll(true);
+      result.selectAllChecked = rows().every((row) => row.checked);
+      await exec.run();
+      const resultBeforeFilter = exec.getResult();
+      const stateBefore = rows()[0];
+
+      elements.tagFilter.value = "706";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      result.sixVisible = rows().filter((row) => !row.hidden).map((row) => row.name);
+      elements.tagFilter.value = "";
+      elements.tagFilter.dispatchEvent({ type: "input" });
+      result.allVisible = rows().filter((row) => !row.hidden).map((row) => row.name);
+      result.stateBefore = stateBefore;
+      result.stateAfter = rows()[0];
+      result.resultStillSame = exec.getResult() === resultBeforeFilter;
+
+      elements.inputPath.value = "C:/data/other.csv";
+      await exec.loadPreview();
+      result.filterAfterReload = elements.tagFilter.value;
+      result.visibleAfterReload = rows().filter((row) => !row.hidden).map((row) => row.name);
     } else if (scenario === "trend_range") {
       const exec = execute((url) => url === "/api/health" ? HEALTH_OK : METHODS_OK);
       const fullStart = Date.parse("2026-09-01T00:00:00");

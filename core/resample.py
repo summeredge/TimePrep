@@ -6,7 +6,7 @@ import pandas as pd
 from pandas.tseries.frequencies import to_offset
 
 # 界面下拉框中的常用周期
-PRESET_RULES = ("1s", "5s", "10s", "1min", "5min")
+PRESET_RULES = ("1min", "5min")
 
 # 至少四分之三的非空值可转为数字，允许少量 PI/DCS 质量字符串。
 NUMERIC_LIKE_MIN_RATIO = 0.75

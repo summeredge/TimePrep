@@ -17,10 +17,17 @@ from core.filter import (
 )
 from core.loader import load_file, to_datetime
 from core.processor import ProcessConfig, VariableConfig, process_data, process_file
-from core.resample import numeric_like_frame, resample
+from core.resample import PRESET_RULES, normalize_rule, numeric_like_frame, resample
 
 
 class CoreProcessingTests(unittest.TestCase):
+    def test_resample_presets_keep_minute_rules_and_custom_seconds(self):
+        self.assertEqual(PRESET_RULES, ("1min", "5min"))
+        self.assertEqual(
+            [normalize_rule(rule) for rule in ("30s", "10s", "15min", "1h")],
+            ["30s", "10s", "15min", "1h"],
+        )
+
     def test_process_data_builds_frame_without_creating_csv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

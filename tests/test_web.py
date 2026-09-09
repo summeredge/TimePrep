@@ -67,6 +67,7 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(result["apiVersion"], web_server.WEB_API_VERSION)
+        self.assertEqual(result["presetRules"], ["", "1min", "5min"])
         self.assertEqual(
             [(item["key"], item["label"], item["defaultParams"]) for item in result["methods"]],
             [
@@ -480,6 +481,19 @@ class WebApiTests(unittest.TestCase):
         self.assertNotIn("resultBody", page)
         self.assertNotIn("renderResult()", page)
 
+    def test_frontend_has_non_invalidating_tag_filter(self):
+        page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
+        script = page[page.index("<script>") : page.index("</script>")]
+
+        self.assertIn('<label for="tagFilter">位号筛选</label>', page)
+        self.assertIn('id="tagFilter" type="text" placeholder="输入位号关键字"', page)
+        self.assertIn("#tagFilter { flex: 1; min-width: 180px; }", page)
+        self.assertIn("$('tagFilter').addEventListener('input', applyTagFilter);", script)
+        self.assertIn("function applyTagFilter()", script)
+        self.assertIn("row.tr.hidden = keyword !== '' && !row.name.toLowerCase().includes(keyword);", script)
+        self.assertIn("$('tagFilter').value = '';", script)
+        self.assertIn("ROWS.push({ name: col.name, check, method: sel, params, tr });", script)
+
     def test_frontend_uses_hidden_only_and_invalidates_on_config_change(self):
         page = (Path(web_server.WEB_DIR) / "index.html").read_text(encoding="utf-8")
         script = page[page.index("<script>") : page.index("</script>")]
@@ -569,6 +583,24 @@ class WebApiTests(unittest.TestCase):
                 ("tableRows", 1),
                 ("rowNames", ["TIC101"]),
                 ("status", "已载入 industrial.csv，共 2 个变量，其中 1 个可处理变量"),
+            ],
+            "tag_filter": [
+                ("ficMatchesSame", True),
+                ("ficVisible", ["FIC706007.PV", "FIC0706004.PV"]),
+                ("sixVisible", ["FIC706007.PV", "FIC0706004.PV", "S_C706"]),
+                ("allVisible", ["FIC706007.PV", "FIC0706004.PV", "S_C706", "TEMP101"]),
+                ("selectAllChecked", True),
+                ("stateBefore", {
+                    "name": "FIC706007.PV", "hidden": False, "checked": True,
+                    "method": "median", "params": "window=5",
+                }),
+                ("stateAfter", {
+                    "name": "FIC706007.PV", "hidden": False, "checked": True,
+                    "method": "median", "params": "window=5",
+                }),
+                ("resultStillSame", True),
+                ("filterAfterReload", ""),
+                ("visibleAfterReload", ["NEW706", "OTHER"]),
             ],
             "trend_range": [
                 ("zoomInDuration", 0.5),
